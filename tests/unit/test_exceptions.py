@@ -10,6 +10,7 @@ from ucmt.exceptions import (
     MigrationStateConflictError,
     SchemaLoadError,
     UcmtError,
+    UnsupportedChangeError,
     UnsupportedSchemaChangeError,
 )
 from ucmt.types import ChangeType
@@ -61,3 +62,7 @@ class TestExceptionHierarchy:
         )
         assert error.change_type == ChangeType.DROP_COLUMN
         assert str(error) == "Cannot drop column"
+
+    def test_unsupported_schema_change_error_is_alias(self):
+        """UnsupportedSchemaChangeError is an alias for UnsupportedChangeError."""
+        assert UnsupportedSchemaChangeError is UnsupportedChangeError

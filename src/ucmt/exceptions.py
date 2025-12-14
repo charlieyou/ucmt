@@ -2,6 +2,21 @@
 
 from ucmt.types import ChangeType
 
+__all__ = [
+    "UcmtError",
+    "SchemaLoadError",
+    "IntrospectionError",
+    "DiffError",
+    "MigrationError",
+    "MigrationParseError",
+    "MigrationStateConflictError",
+    "MigrationChecksumMismatchError",
+    "UnsupportedChangeError",
+    "UnsupportedSchemaChangeError",
+    "CodegenError",
+    "ConfigError",
+]
+
 
 class UcmtError(Exception):
     """Base exception for ucmt."""

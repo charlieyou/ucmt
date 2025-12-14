@@ -9,6 +9,15 @@ ColumnName: TypeAlias = str
 CatalogName: TypeAlias = str
 SchemaName: TypeAlias = str
 
+__all__ = [
+    "TableName",
+    "ColumnName",
+    "CatalogName",
+    "SchemaName",
+    "ChangeType",
+    "SchemaChange",
+]
+
 
 class ChangeType(Enum):
     """Types of schema changes that can be detected and applied."""
@@ -36,7 +45,7 @@ class SchemaChange:
     """Represents a single schema change detected by the differ."""
 
     change_type: ChangeType
-    table_name: str
+    table_name: TableName
     details: dict[str, Any] = field(default_factory=dict)
     is_destructive: bool = False
     is_unsupported: bool = False
