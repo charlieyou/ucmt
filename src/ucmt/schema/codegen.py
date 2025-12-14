@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from ucmt.exceptions import CodegenError
+from ucmt.exceptions import CodegenError, UnsupportedSchemaChangeError
 from ucmt.schema.diff import SchemaChange
 from ucmt.schema.models import CheckConstraint, Column, PrimaryKey, Table
 from ucmt.types import ChangeType
@@ -20,19 +20,24 @@ class MigrationGenerator:
         self.catalog = catalog
         self.schema = schema
 
+    def _now(self) -> datetime:
+        """Get current timestamp. Override in tests for determinism."""
+        return datetime.now()
+
     def generate(self, changes: list[SchemaChange], description: str) -> str:
         """Generate SQL migration file content."""
         errors = [c for c in changes if c.is_unsupported]
         if errors:
             error_msgs = "\n".join(f"-- ERROR: {c.error_message}" for c in errors)
-            raise CodegenError(
-                f"Cannot generate migration - unsupported changes:\n{error_msgs}"
+            raise UnsupportedSchemaChangeError(
+                errors[0].change_type,
+                f"Cannot generate migration - unsupported changes:\n{error_msgs}",
             )
 
         lines = [
             "-- Migration: Auto-generated",
             f"-- Description: {description}",
-            f"-- Generated: {datetime.now().isoformat()}",
+            f"-- Generated: {self._now().isoformat()}",
             "",
             "-- Variable substitution: ${catalog}, ${schema}",
             "",
