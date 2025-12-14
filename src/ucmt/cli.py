@@ -114,11 +114,6 @@ def main() -> int:
         default=Path("schema/tables"),
         help="Output directory for YAML files (default: schema/tables)",
     )
-    pull_parser.add_argument(
-        "--stamp",
-        action="store_true",
-        help="Mark current state as baseline (no migrations needed)",
-    )
     add_db_args(pull_parser)
 
     args = parser.parse_args()
@@ -234,7 +229,11 @@ def cmd_generate(args: argparse.Namespace) -> int:
             schema=config.schema or "${schema}",
         )
         sql = generator.generate(changes, args.description)
-        print(sql)
+        if args.output:
+            args.output.write_text(sql, encoding="utf-8")
+            print(f"Wrote migration to {args.output}")
+        else:
+            print(sql)
         return 0
     except ConfigError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
@@ -453,11 +452,6 @@ def cmd_pull(args: argparse.Namespace) -> int:
         print(f"Pulled {len(created_files)} table(s) to {args.output}:")
         for file_path in created_files:
             print(f"  - {file_path.name}")
-
-        if args.stamp:
-            print(
-                "\nNote: --stamp flag set but stamp functionality not yet implemented"
-            )
 
         return 0
     except ConfigError as e:

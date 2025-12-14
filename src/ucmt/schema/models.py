@@ -2,42 +2,6 @@
 
 from dataclasses import dataclass, field
 from typing import Optional
-import re
-
-
-class DeltaTypeRules:
-    """Rules for Delta Lake type changes - widening, narrowing, and unsupported changes."""
-
-    WIDENING_PATHS: dict[str, list[str]] = {
-        "TINYINT": ["SMALLINT", "INT", "BIGINT"],
-        "SMALLINT": ["INT", "BIGINT"],
-        "INT": ["BIGINT"],
-        "FLOAT": ["DOUBLE"],
-    }
-
-    @classmethod
-    def is_widening(cls, from_type: str, to_type: str) -> bool:
-        """Check if from_type -> to_type is a valid widening operation."""
-        from_upper = from_type.upper()
-        to_upper = to_type.upper()
-        if from_upper == to_upper:
-            return False
-        allowed = cls.WIDENING_PATHS.get(from_upper, [])
-        return to_upper in allowed
-
-    @classmethod
-    def is_decimal_change_unsupported(cls, from_type: str, to_type: str) -> bool:
-        """Check if a DECIMAL precision/scale change is unsupported in v1."""
-        from_upper = from_type.upper()
-        to_upper = to_type.upper()
-        decimal_pattern = re.compile(r"DECIMAL\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)")
-        from_match = decimal_pattern.match(from_upper)
-        to_match = decimal_pattern.match(to_upper)
-        if not from_match or not to_match:
-            return False
-        from_prec, from_scale = from_match.groups()
-        to_prec, to_scale = to_match.groups()
-        return (from_prec, from_scale) != (to_prec, to_scale)
 
 
 @dataclass

@@ -16,10 +16,11 @@ def load_databrickscfg(profile: str = "DEFAULT") -> dict[str, str]:
         profile: Profile name to load (default: "DEFAULT")
 
     Returns:
-        Dict with host, token, and optionally http_path/serverless_compute_id
+        Dict with host, token, and optionally http_path/serverless_compute_id.
+        Returns empty dict if file doesn't exist.
 
     Raises:
-        ConfigError: If file not found or profile doesn't exist
+        ConfigError: If profile doesn't exist in the config file.
     """
     cfg_path = Path.home() / ".databrickscfg"
     if not cfg_path.exists():
@@ -70,7 +71,6 @@ class Config:
     databricks_host: Optional[str] = None
     databricks_token: Optional[str] = None
     databricks_http_path: Optional[str] = None
-    databricks_warehouse_id: Optional[str] = None
 
     @classmethod
     def from_env(
@@ -84,7 +84,6 @@ class Config:
         databricks_host: Optional[str] = None,
         databricks_token: Optional[str] = None,
         databricks_http_path: Optional[str] = None,
-        databricks_warehouse_id: Optional[str] = None,
         profile: Optional[str] = None,
     ) -> "Config":
         """Load configuration from ~/.databrickscfg, env vars, with CLI overrides.
@@ -127,9 +126,6 @@ class Config:
             databricks_token=resolve(databricks_token, "DATABRICKS_TOKEN", "token"),
             databricks_http_path=resolve(
                 databricks_http_path, "DATABRICKS_HTTP_PATH", "http_path"
-            ),
-            databricks_warehouse_id=resolve(
-                databricks_warehouse_id, "DATABRICKS_WAREHOUSE_ID"
             ),
         )
 

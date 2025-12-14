@@ -1,5 +1,4 @@
 table: transactions
-description: Financial transactions
 
 columns:
   - name: id

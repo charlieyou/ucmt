@@ -3,7 +3,6 @@
 from ucmt.schema.models import (
     CheckConstraint,
     Column,
-    DeltaTypeRules,
     ForeignKey,
     PrimaryKey,
     Table,
@@ -44,78 +43,6 @@ class TestModelsBasic:
         cc = CheckConstraint(name="positive_amount", expression="amount > 0")
         assert cc.name == "positive_amount"
         assert cc.expression == "amount > 0"
-
-
-class TestDeltaTypeRulesWidening:
-    """Tests for Delta type widening rules."""
-
-    def test_int_to_bigint_allowed(self):
-        """INT to BIGINT is a valid widening operation."""
-        assert DeltaTypeRules.is_widening("INT", "BIGINT") is True
-
-    def test_bigint_to_int_rejected(self):
-        """BIGINT to INT is narrowing and should be rejected."""
-        assert DeltaTypeRules.is_widening("BIGINT", "INT") is False
-
-    def test_float_to_double_allowed(self):
-        """FLOAT to DOUBLE is a valid widening operation."""
-        assert DeltaTypeRules.is_widening("FLOAT", "DOUBLE") is True
-
-    def test_double_to_float_rejected(self):
-        """DOUBLE to FLOAT is narrowing and should be rejected."""
-        assert DeltaTypeRules.is_widening("DOUBLE", "FLOAT") is False
-
-    def test_tinyint_to_smallint_allowed(self):
-        """TINYINT to SMALLINT is a valid widening operation."""
-        assert DeltaTypeRules.is_widening("TINYINT", "SMALLINT") is True
-
-    def test_smallint_to_int_allowed(self):
-        """SMALLINT to INT is a valid widening operation."""
-        assert DeltaTypeRules.is_widening("SMALLINT", "INT") is True
-
-    def test_same_type_is_not_widening(self):
-        """Same type to same type is not a widening operation."""
-        assert DeltaTypeRules.is_widening("INT", "INT") is False
-
-    def test_case_insensitive(self):
-        """Type comparison should be case-insensitive."""
-        assert DeltaTypeRules.is_widening("int", "bigint") is True
-        assert DeltaTypeRules.is_widening("Int", "BigInt") is True
-
-
-class TestDecimalPrecisionComparison:
-    """Tests for DECIMAL precision/scale change handling."""
-
-    def test_decimal_precision_change_unsupported(self):
-        """DECIMAL precision changes are marked as unsupported in v1."""
-        assert (
-            DeltaTypeRules.is_decimal_change_unsupported(
-                "DECIMAL(10,2)", "DECIMAL(12,2)"
-            )
-            is True
-        )
-
-    def test_decimal_scale_change_unsupported(self):
-        """DECIMAL scale changes are marked as unsupported in v1."""
-        assert (
-            DeltaTypeRules.is_decimal_change_unsupported(
-                "DECIMAL(10,2)", "DECIMAL(10,4)"
-            )
-            is True
-        )
-
-    def test_decimal_same_precision_scale_not_unsupported(self):
-        """Same DECIMAL precision/scale is not a change."""
-        assert (
-            DeltaTypeRules.is_decimal_change_unsupported(
-                "DECIMAL(10,2)", "DECIMAL(10,2)"
-            )
-            is False
-        )
-
-    def test_non_decimal_types_not_unsupported(self):
-        """Non-DECIMAL types should not trigger unsupported."""
-        assert DeltaTypeRules.is_decimal_change_unsupported("INT", "BIGINT") is False
 
 
 class TestPrimaryKeyEquality:

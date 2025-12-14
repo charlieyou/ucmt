@@ -1,5 +1,4 @@
 table: users
-description: Core user accounts
 
 columns:
   - name: id

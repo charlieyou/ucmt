@@ -33,14 +33,6 @@ def build_config_and_validate(
     return config
 
 
-def build_config_from_env_and_validate() -> Config:
-    """Load config from environment and validate for DB operations.
-
-    Deprecated: Use build_config_and_validate() instead.
-    """
-    return build_config_and_validate()
-
-
 def get_online_schema(config: Config) -> Schema:
     """Get current schema from database via introspection.
 

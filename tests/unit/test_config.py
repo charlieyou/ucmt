@@ -19,7 +19,6 @@ class TestConfigDefaults:
         assert config.databricks_host is None
         assert config.databricks_token is None
         assert config.databricks_http_path is None
-        assert config.databricks_warehouse_id is None
 
 
 class TestConfigFromEnv:
@@ -34,7 +33,6 @@ class TestConfigFromEnv:
         monkeypatch.setenv("DATABRICKS_HOST", "my-workspace.databricks.com")
         monkeypatch.setenv("DATABRICKS_TOKEN", "dapi123")
         monkeypatch.setenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/abc")
-        monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "abc123")
 
         config = Config.from_env()
 
@@ -45,7 +43,6 @@ class TestConfigFromEnv:
         assert config.databricks_host == "my-workspace.databricks.com"
         assert config.databricks_token == "dapi123"
         assert config.databricks_http_path == "/sql/1.0/warehouses/abc"
-        assert config.databricks_warehouse_id == "abc123"
 
     def test_config_uses_defaults_when_env_not_set(self, monkeypatch):
         """Config.from_env() should use defaults when env vars not set."""
@@ -56,7 +53,6 @@ class TestConfigFromEnv:
         monkeypatch.delenv("DATABRICKS_HOST", raising=False)
         monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
         monkeypatch.delenv("DATABRICKS_HTTP_PATH", raising=False)
-        monkeypatch.delenv("DATABRICKS_WAREHOUSE_ID", raising=False)
 
         config = Config.from_env()
 
@@ -71,12 +67,6 @@ class TestConfigFromEnv:
         monkeypatch.setenv("UCMT_STATE_TABLE", "custom_migrations")
         config = Config.from_env()
         assert config.state_table == "custom_migrations"
-
-    def test_config_loads_warehouse_id_from_env(self, monkeypatch):
-        """Config.from_env() should load DATABRICKS_WAREHOUSE_ID."""
-        monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "wh-12345")
-        config = Config.from_env()
-        assert config.databricks_warehouse_id == "wh-12345"
 
 
 class TestConfigCliOverrides:

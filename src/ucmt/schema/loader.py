@@ -17,7 +17,6 @@ from ucmt.schema.models import (
 
 VALID_TABLE_FIELDS = {
     "table",
-    "description",
     "columns",
     "primary_key",
     "check_constraints",

@@ -157,6 +157,7 @@ columns:
             online=False,
             description="Add users table",
             allow_destructive=False,
+            output=None,
         )
 
         with patch("builtins.print") as mock_print:
@@ -214,6 +215,7 @@ columns:
             online=True,
             description="Add users table",
             allow_destructive=False,
+            output=None,
         )
 
         mock_schema = Schema(tables={})

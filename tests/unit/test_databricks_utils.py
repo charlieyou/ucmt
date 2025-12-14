@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 from ucmt.config import Config
 from ucmt.databricks.utils import (
-    build_config_from_env_and_validate,
+    build_config_and_validate,
     get_online_schema,
     split_sql_statements,
 )
@@ -13,7 +13,7 @@ from ucmt.exceptions import ConfigError
 from ucmt.schema.models import Column, Schema, Table
 
 
-class TestBuildConfigFromEnvAndValidate:
+class TestBuildConfigAndValidate:
     def test_returns_validated_config(self, monkeypatch):
         monkeypatch.setenv("UCMT_CATALOG", "test_catalog")
         monkeypatch.setenv("UCMT_SCHEMA", "test_schema")
@@ -21,7 +21,7 @@ class TestBuildConfigFromEnvAndValidate:
         monkeypatch.setenv("DATABRICKS_TOKEN", "token123")
         monkeypatch.setenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/abc")
 
-        config = build_config_from_env_and_validate()
+        config = build_config_and_validate()
 
         assert config.catalog == "test_catalog"
         assert config.schema == "test_schema"
@@ -35,7 +35,7 @@ class TestBuildConfigFromEnvAndValidate:
         monkeypatch.delenv("DATABRICKS_HTTP_PATH", raising=False)
 
         with pytest.raises(ConfigError):
-            build_config_from_env_and_validate()
+            build_config_and_validate()
 
 
 class TestGetOnlineSchema:
