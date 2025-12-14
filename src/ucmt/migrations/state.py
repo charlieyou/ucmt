@@ -130,9 +130,9 @@ class DatabricksMigrationStateStore:
         self._schema = _validate_identifier(config.schema, "schema")
         self._state_table = _validate_identifier(config.state_table, "state_table")
         self._connection = sql.connect(
-            server_hostname=config.server_hostname,
-            http_path=config.http_path,
-            access_token=config.access_token,
+            server_hostname=config.databricks_host,
+            http_path=config.databricks_http_path,
+            access_token=config.databricks_token,
         )
         self._ensure_state_table()
 
