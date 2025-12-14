@@ -2,6 +2,42 @@
 
 from dataclasses import dataclass, field
 from typing import Optional
+import re
+
+
+class DeltaTypeRules:
+    """Rules for Delta Lake type changes - widening, narrowing, and unsupported changes."""
+
+    WIDENING_PATHS: dict[str, list[str]] = {
+        "TINYINT": ["SMALLINT", "INT", "BIGINT"],
+        "SMALLINT": ["INT", "BIGINT"],
+        "INT": ["BIGINT"],
+        "FLOAT": ["DOUBLE"],
+    }
+
+    @classmethod
+    def is_widening(cls, from_type: str, to_type: str) -> bool:
+        """Check if from_type -> to_type is a valid widening operation."""
+        from_upper = from_type.upper()
+        to_upper = to_type.upper()
+        if from_upper == to_upper:
+            return False
+        allowed = cls.WIDENING_PATHS.get(from_upper, [])
+        return to_upper in allowed
+
+    @classmethod
+    def is_decimal_change_unsupported(cls, from_type: str, to_type: str) -> bool:
+        """Check if a DECIMAL precision/scale change is unsupported in v1."""
+        from_upper = from_type.upper()
+        to_upper = to_type.upper()
+        decimal_pattern = re.compile(r"DECIMAL\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)")
+        from_match = decimal_pattern.match(from_upper)
+        to_match = decimal_pattern.match(to_upper)
+        if not from_match or not to_match:
+            return False
+        from_prec, from_scale = from_match.groups()
+        to_prec, to_scale = to_match.groups()
+        return (from_prec, from_scale) != (to_prec, to_scale)
 
 
 @dataclass
@@ -59,6 +95,15 @@ class Column:
     foreign_key: Optional[ForeignKey] = None
     comment: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        """Strip whitespace from type. Use normalized_type for comparisons."""
+        self.type = self.type.strip()
+
+    @property
+    def normalized_type(self) -> str:
+        """Return uppercase base type for case-insensitive comparisons."""
+        return self.type.upper()
+
 
 @dataclass
 class Table:
@@ -72,6 +117,34 @@ class Table:
     partitioned_by: list[str] = field(default_factory=list)
     table_properties: dict[str, str] = field(default_factory=dict)
     comment: Optional[str] = None
+
+    def __eq__(self, other: object) -> bool:
+        """Compare tables - column order, clustering order, partitioning order not significant."""
+        if not isinstance(other, Table):
+            return NotImplemented
+        if self.name != other.name:
+            return False
+        if self.primary_key != other.primary_key:
+            return False
+        self_constraints = {c.name: c for c in self.check_constraints}
+        other_constraints = {c.name: c for c in other.check_constraints}
+        if self_constraints != other_constraints:
+            return False
+        if set(self.liquid_clustering) != set(other.liquid_clustering):
+            return False
+        if set(self.partitioned_by) != set(other.partitioned_by):
+            return False
+        if self.table_properties != other.table_properties:
+            return False
+        if self.comment != other.comment:
+            return False
+        self_cols = {col.name: col for col in self.columns}
+        other_cols = {col.name: col for col in other.columns}
+        return self_cols == other_cols
+
+    def __hash__(self) -> int:
+        """Hash based on name only for dict/set usage."""
+        return hash(self.name)
 
     def has_column_mapping(self) -> bool:
         """Check if column mapping mode is enabled (required for DROP/RENAME)."""
