@@ -82,6 +82,21 @@ def main() -> int:
         help="Show pending migrations without executing",
     )
 
+    pull_parser = subparsers.add_parser(
+        "pull", help="Pull schema from database and generate YAML files"
+    )
+    pull_parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("schema/tables"),
+        help="Output directory for YAML files (default: schema/tables)",
+    )
+    pull_parser.add_argument(
+        "--stamp",
+        action="store_true",
+        help="Mark current state as baseline (no migrations needed)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "validate":
@@ -96,6 +111,8 @@ def main() -> int:
         return cmd_plan(args)
     elif args.command == "run":
         return cmd_run(args)
+    elif args.command == "pull":
+        return cmd_pull(args)
     else:
         print(f"Command '{args.command}' not yet implemented", file=sys.stderr)
         return 1
@@ -365,6 +382,52 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
     except Exception as e:
         print(f"Run error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_pull(args: argparse.Namespace) -> int:
+    """Pull schema from database and generate YAML files."""
+    try:
+        from ucmt.databricks.client import DatabricksClient
+        from ucmt.schema.exporter import export_schema_to_directory
+        from ucmt.schema.introspect import SchemaIntrospector
+
+        config = Config.from_env()
+        if not _validate_db_config(config):
+            return 1
+
+        with DatabricksClient(
+            host=config.databricks_host,
+            token=config.databricks_token,
+            http_path=config.databricks_http_path,
+        ) as client:
+            introspector = SchemaIntrospector(client, config.catalog, config.schema)
+            schema = introspector.introspect_schema()
+
+            if not schema.tables:
+                print(
+                    f"No tables found in {config.catalog}.{config.schema}",
+                    file=sys.stderr,
+                )
+                return 1
+
+            created_files = export_schema_to_directory(schema, args.output)
+
+            print(f"Pulled {len(created_files)} table(s) to {args.output}:")
+            for file_path in created_files:
+                print(f"  - {file_path.name}")
+
+            if args.stamp:
+                print(
+                    "\nNote: --stamp flag set but stamp functionality not yet implemented"
+                )
+
+            return 0
+    except ConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:
+        print(f"Pull error: {e}", file=sys.stderr)
         return 1
 
 

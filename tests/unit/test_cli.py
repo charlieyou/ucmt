@@ -3,8 +3,8 @@
 import argparse
 from unittest.mock import patch
 
-from ucmt.cli import cmd_diff, cmd_generate
-from ucmt.schema.models import Schema
+from ucmt.cli import cmd_diff, cmd_generate, cmd_pull
+from ucmt.schema.models import Column, Schema, Table
 
 
 class TestCmdDiffOffline:
@@ -218,3 +218,144 @@ columns:
         assert result == 0
         printed_output = " ".join(str(call) for call in mock_print.call_args_list)
         assert "CREATE TABLE" in printed_output
+
+
+class TestCmdStatus:
+    """Test cmd_status displays failed migrations correctly."""
+
+    def test_status_shows_failed_migrations(self, tmp_path):
+        """Status should show ✗ failed for migrations with success=False."""
+        from datetime import datetime
+        from unittest.mock import MagicMock
+
+        from ucmt.cli import cmd_status
+        from ucmt.migrations.state import AppliedMigration
+
+        migrations_dir = tmp_path / "sql" / "migrations"
+        migrations_dir.mkdir(parents=True)
+        (migrations_dir / "V001__create_users.sql").write_text(
+            "CREATE TABLE users (id INT);"
+        )
+        (migrations_dir / "V002__add_email.sql").write_text(
+            "ALTER TABLE users ADD email STRING;"
+        )
+
+        args = argparse.Namespace(migrations_path=migrations_dir)
+
+        mock_state_store = MagicMock()
+        mock_state_store.__enter__ = MagicMock(return_value=mock_state_store)
+        mock_state_store.__exit__ = MagicMock(return_value=False)
+        mock_state_store.list_applied.return_value = [
+            AppliedMigration(
+                version=1,
+                name="create_users",
+                checksum="abc",
+                applied_at=datetime.now(),
+                success=True,
+            ),
+            AppliedMigration(
+                version=2,
+                name="add_email",
+                checksum="def",
+                applied_at=datetime.now(),
+                success=False,
+                error="syntax error",
+            ),
+        ]
+
+        with (
+            patch(
+                "ucmt.migrations.state.DatabricksMigrationStateStore",
+                return_value=mock_state_store,
+            ),
+            patch("ucmt.cli.Config.from_env"),
+            patch("ucmt.cli._validate_db_config", return_value=True),
+            patch("builtins.print") as mock_print,
+        ):
+            result = cmd_status(args)
+
+        assert result == 0
+        printed_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = " ".join(printed_calls)
+        assert "V2" in printed_output and "✗ failed" in printed_output
+
+
+class TestCmdPull:
+    """Test cmd_pull command."""
+
+    def test_pull_requires_db_config(self, tmp_path):
+        """Pull should fail if DB config is missing."""
+        output_dir = tmp_path / "schema"
+        args = argparse.Namespace(output=output_dir, stamp=False)
+
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("builtins.print"):
+                result = cmd_pull(args)
+
+        assert result == 1
+
+    def test_pull_creates_yaml_files(self, tmp_path):
+        """Pull should create YAML files for each table."""
+        output_dir = tmp_path / "schema"
+        args = argparse.Namespace(output=output_dir, stamp=False)
+
+        mock_schema = Schema(
+            tables={
+                "users": Table(
+                    name="users",
+                    columns=[Column(name="id", type="BIGINT")],
+                ),
+            }
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "UCMT_CATALOG": "test_catalog",
+                "UCMT_SCHEMA": "test_schema",
+                "DATABRICKS_HOST": "test.cloud.databricks.com",
+                "DATABRICKS_TOKEN": "test_token",
+                "DATABRICKS_HTTP_PATH": "/sql/1.0/warehouses/abc123",
+            },
+        ):
+            with patch("ucmt.databricks.client.DatabricksClient"):
+                with patch(
+                    "ucmt.schema.introspect.SchemaIntrospector"
+                ) as mock_introspector_class:
+                    mock_introspector = mock_introspector_class.return_value
+                    mock_introspector.introspect_schema.return_value = mock_schema
+
+                    with patch("builtins.print"):
+                        result = cmd_pull(args)
+
+        assert result == 0
+        assert (output_dir / "users.yaml").exists()
+
+    def test_pull_returns_error_when_no_tables(self, tmp_path):
+        """Pull should return error if no tables found."""
+        output_dir = tmp_path / "schema"
+        args = argparse.Namespace(output=output_dir, stamp=False)
+
+        empty_schema = Schema(tables={})
+
+        with patch.dict(
+            "os.environ",
+            {
+                "UCMT_CATALOG": "test_catalog",
+                "UCMT_SCHEMA": "test_schema",
+                "DATABRICKS_HOST": "test.cloud.databricks.com",
+                "DATABRICKS_TOKEN": "test_token",
+                "DATABRICKS_HTTP_PATH": "/sql/1.0/warehouses/abc123",
+            },
+        ):
+            with patch("ucmt.databricks.client.DatabricksClient"):
+                with patch(
+                    "ucmt.schema.introspect.SchemaIntrospector"
+                ) as mock_introspector_class:
+                    mock_introspector = mock_introspector_class.return_value
+                    mock_introspector.introspect_schema.return_value = empty_schema
+
+                    with patch("builtins.print"):
+                        result = cmd_pull(args)
+
+        assert result == 1
