@@ -42,7 +42,7 @@ def _get_current_schema_online(config: Config) -> Schema | None:
     Returns None if there's an error (error message already printed to stderr).
     """
     try:
-        from databricks import sql as databricks_sql
+        from databricks import sql as databricks_sql  # noqa: F401
     except ImportError:
         print(
             "Error: databricks-sql-connector not installed. "
@@ -51,20 +51,18 @@ def _get_current_schema_online(config: Config) -> Schema | None:
         )
         return None
 
-    from ucmt.client import DatabricksClient
+    from ucmt.databricks.client import DatabricksClient
     from ucmt.schema.introspect import SchemaIntrospector
 
     if not _validate_db_config(config):
         return None
 
-    with closing(
-        databricks_sql.connect(
-            server_hostname=config.databricks_host,
-            http_path=config.databricks_http_path,
-            access_token=config.databricks_token,
-        )
-    ) as connection:
-        client = DatabricksClient(connection)
+    client = DatabricksClient(
+        host=config.databricks_host,
+        token=config.databricks_token,
+        http_path=config.databricks_http_path,
+    )
+    with client:
         introspector = SchemaIntrospector(client, config.catalog, config.schema)
         return introspector.introspect_schema()
 
