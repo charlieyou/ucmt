@@ -109,3 +109,43 @@ class TestInMemoryMigrationStateStore:
             store.record_applied(
                 version=1, name="create_users", checksum="different", success=True
             )
+
+    def test_has_applied_returns_true_for_failed_migration(self):
+        store = InMemoryMigrationStateStore()
+        store.record_applied(
+            version=1, name="create_users", checksum="abc", success=False, error="boom"
+        )
+
+        assert store.has_applied(1) is True
+
+    def test_record_failed_migration_twice_is_idempotent(self):
+        store = InMemoryMigrationStateStore()
+        store.record_applied(
+            version=1, name="create_users", checksum="abc", success=False, error="boom"
+        )
+        store.record_applied(
+            version=1,
+            name="create_users",
+            checksum="abc",
+            success=False,
+            error="still boom",
+        )
+
+        applied = store.list_applied()
+        assert len(applied) == 1
+        assert applied[0].error == "boom"
+        assert applied[0].success is False
+
+    def test_record_same_checksum_different_success_does_not_overwrite(self):
+        store = InMemoryMigrationStateStore()
+        store.record_applied(
+            version=1, name="create_users", checksum="abc", success=False, error="boom"
+        )
+        store.record_applied(
+            version=1, name="create_users", checksum="abc", success=True, error=None
+        )
+
+        applied = store.list_applied()
+        assert len(applied) == 1
+        assert applied[0].success is False
+        assert applied[0].error == "boom"
