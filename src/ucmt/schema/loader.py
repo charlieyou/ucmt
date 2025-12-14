@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import yaml
+from yaml import YAMLError
 
 from ucmt.exceptions import SchemaLoadError
 from ucmt.schema.models import (
@@ -64,12 +65,25 @@ def _load_directory(directory: Path) -> Schema:
 def _load_single_file(file_path: Path) -> Schema:
     """Load schema from a single YAML file."""
     with open(file_path) as f:
-        data = yaml.safe_load(f)
+        try:
+            data = yaml.safe_load(f)
+        except YAMLError as e:
+            raise SchemaLoadError(f"Invalid YAML in {file_path}: {e}") from e
 
     if data is None:
         raise SchemaLoadError(f"Empty YAML file: {file_path}")
 
+    if not isinstance(data, dict):
+        raise SchemaLoadError(
+            f"Top-level YAML must be a mapping/dict, got {type(data).__name__} in {file_path}"
+        )
+
     if "tables" in data:
+        tables_field = data["tables"]
+        if not isinstance(tables_field, list):
+            raise SchemaLoadError(
+                f"'tables' field must be a list, got {type(tables_field).__name__} in {file_path}"
+            )
         tables: dict[str, Table] = {}
         for table_data in data.get("tables", []):
             table = _parse_table_dict(table_data)
@@ -85,9 +99,16 @@ def _load_single_file(file_path: Path) -> Schema:
 def _parse_table_yaml(file_path: Path) -> Table:
     """Parse a table definition from a YAML file."""
     with open(file_path) as f:
-        data = yaml.safe_load(f)
+        try:
+            data = yaml.safe_load(f)
+        except YAMLError as e:
+            raise SchemaLoadError(f"Invalid YAML in {file_path}: {e}") from e
     if data is None:
         raise SchemaLoadError(f"Empty YAML file: {file_path}")
+    if not isinstance(data, dict):
+        raise SchemaLoadError(
+            f"Top-level YAML must be a mapping/dict, got {type(data).__name__} in {file_path}"
+        )
     return _parse_table_dict(data)
 
 
