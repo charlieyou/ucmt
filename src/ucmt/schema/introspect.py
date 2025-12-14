@@ -1,203 +1,219 @@
-"""Read current database state from Unity Catalog."""
+"""Schema introspection from Unity Catalog using DatabricksClient."""
 
-from typing import Any, Optional
+import json
+from typing import Any, Protocol
 
 from ucmt.schema.models import (
     CheckConstraint,
     Column,
-    ForeignKey,
     PrimaryKey,
     Schema,
     Table,
 )
 
 
+class SQLClient(Protocol):
+    """Protocol for SQL client used by introspector."""
+
+    def fetchall(self, sql: str) -> list: ...
+
+
 class SchemaIntrospector:
-    """Read current schema state from Databricks Unity Catalog."""
+    """Introspect schema from Unity Catalog using DatabricksClient."""
 
-    def __init__(self, spark: Any, catalog: str, schema: str):
-        self.spark = spark
-        self.catalog = catalog
-        self.schema = schema
+    VALID_TABLE_TYPES = {"MANAGED", "EXTERNAL"}
 
-    def introspect(self) -> Schema:
-        """Query information_schema to build Schema object."""
-        tables = {}
-        for table_name in self._get_table_names():
-            tables[table_name] = self._introspect_table(table_name)
-        return Schema(tables=tables)
+    def __init__(self, client: SQLClient, catalog: str, schema: str) -> None:
+        self._client = client
+        self._catalog = catalog
+        self._schema = schema
 
-    def _get_table_names(self) -> list[str]:
-        """Get all table names in schema (excluding internal tables)."""
-        query = f"""
-            SELECT table_name
-            FROM {self.catalog}.information_schema.tables
-            WHERE table_schema = '{self.schema}'
-              AND table_type IN ('MANAGED', 'EXTERNAL')
-              AND table_name NOT LIKE '\\_%'
-        """
-        return [row.table_name for row in self.spark.sql(query).collect()]
+    def _row_get(self, row: Any, key: str, default: Any = None) -> Any:
+        """Safely get a value from a row, supporting dict-like and pyspark Row."""
+        if hasattr(row, "get"):
+            return row.get(key, default)
+        if hasattr(row, "asDict"):
+            return row.asDict().get(key, default)
+        try:
+            return row[key]
+        except Exception:
+            return default
 
-    def _introspect_table(self, table_name: str) -> Table:
-        """Build Table object from information_schema + DESCRIBE queries."""
-        columns = self._get_columns(table_name)
-        primary_key = self._get_primary_key(table_name)
-        check_constraints = self._get_check_constraints(table_name)
-        properties = self._get_table_properties(table_name)
-        clustering = self._get_clustering(table_name)
-        partitioning = self._get_partitioning(table_name)
+    def introspect_table(self, table_name: str) -> Table | None:
+        """Introspect a single table. Returns None if not found or not a Delta table."""
+        table_info = self._fetch_table_info(table_name)
+        if table_info is None:
+            return None
+
+        if not self._is_valid_table(table_info):
+            return None
+
+        columns = self._fetch_columns(table_name)
+        primary_key = self._fetch_primary_key(table_name)
+        check_constraints = self._fetch_check_constraints(table_name)
+        table_properties = self._fetch_table_properties(table_name)
+        liquid_clustering = self._parse_clustering_columns(table_info)
 
         return Table(
             name=table_name,
             columns=columns,
             primary_key=primary_key,
             check_constraints=check_constraints,
-            liquid_clustering=clustering,
-            partitioned_by=partitioning,
-            table_properties=properties,
+            liquid_clustering=liquid_clustering,
+            table_properties=table_properties,
+            comment=table_info.get("comment"),
         )
 
-    def _get_columns(self, table_name: str) -> list[Column]:
-        """Get column definitions from information_schema.columns."""
-        query = f"""
-            SELECT
-                column_name,
-                full_data_type,
-                is_nullable,
-                column_default,
-                comment
-            FROM {self.catalog}.information_schema.columns
-            WHERE table_schema = '{self.schema}'
+    def introspect_schema(self) -> Schema:
+        """Introspect all Delta tables in the schema."""
+        tables = {}
+        table_names = self._fetch_all_table_names()
+
+        for name in table_names:
+            table = self.introspect_table(name)
+            if table is not None:
+                tables[name] = table
+
+        return Schema(tables=tables)
+
+    def _fetch_table_info(self, table_name: str) -> dict | None:
+        """Fetch table metadata from information_schema.tables."""
+        sql = f"""
+            SELECT table_name, table_type, data_source_format, comment, clustering_columns
+            FROM {self._catalog}.information_schema.tables
+            WHERE table_schema = '{self._schema}'
+              AND table_name = '{table_name}'
+        """
+        rows = self._client.fetchall(sql)
+        if not rows:
+            return None
+        for row in rows:
+            if row["table_name"] == table_name:
+                return {
+                    "table_name": row["table_name"],
+                    "table_type": row["table_type"],
+                    "data_source_format": row.get("data_source_format"),
+                    "comment": row.get("comment"),
+                    "clustering_columns": row.get("clustering_columns"),
+                }
+        return None
+
+    def _is_valid_table(self, table_info: dict) -> bool:
+        """Check if table is a valid Delta table (not view, temp, streaming)."""
+        table_type = (table_info.get("table_type") or "").upper()
+        data_source_format = (table_info.get("data_source_format") or "").strip().upper()
+
+        if table_type not in self.VALID_TABLE_TYPES:
+            return False
+
+        if data_source_format and data_source_format != "DELTA":
+            return False
+
+        return True
+
+    def _fetch_columns(self, table_name: str) -> list[Column]:
+        """Fetch columns from information_schema.columns."""
+        sql = f"""
+            SELECT table_name, column_name, data_type, is_nullable, column_default, comment
+            FROM {self._catalog}.information_schema.columns
+            WHERE table_schema = '{self._schema}'
               AND table_name = '{table_name}'
             ORDER BY ordinal_position
         """
-        rows = self.spark.sql(query).collect()
-
+        rows = self._client.fetchall(sql)
         columns = []
         for row in rows:
-            fk = self._get_foreign_key_for_column(table_name, row.column_name)
-            columns.append(
-                Column(
-                    name=row.column_name,
-                    type=row.full_data_type,
-                    nullable=(row.is_nullable == "YES"),
-                    default=row.column_default,
-                    foreign_key=fk,
-                    comment=row.comment,
-                )
+            if row.get("table_name", table_name) != table_name:
+                continue
+            col = Column(
+                name=row["column_name"],
+                type=row["data_type"].upper(),
+                nullable=row["is_nullable"] != "NO",
+                default=row.get("column_default"),
+                comment=row.get("comment"),
             )
+            columns.append(col)
         return columns
 
-    def _get_primary_key(self, table_name: str) -> Optional[PrimaryKey]:
-        """Get primary key from information_schema.table_constraints."""
-        query = f"""
-            SELECT
-                tc.constraint_name,
-                tc.enforced,
-                kcu.column_name,
-                kcu.ordinal_position
-            FROM {self.catalog}.information_schema.table_constraints tc
-            JOIN {self.catalog}.information_schema.key_column_usage kcu
-              ON tc.constraint_catalog = kcu.constraint_catalog
-              AND tc.constraint_schema = kcu.constraint_schema
-              AND tc.constraint_name = kcu.constraint_name
-            WHERE tc.table_schema = '{self.schema}'
+    def _fetch_primary_key(self, table_name: str) -> PrimaryKey | None:
+        """Fetch primary key constraint."""
+        sql = f"""
+            SELECT constraint_name, constraint_type, column_name, rely
+            FROM {self._catalog}.information_schema.table_constraints tc
+            JOIN {self._catalog}.information_schema.constraint_column_usage ccu
+              ON tc.constraint_name = ccu.constraint_name
+            WHERE tc.table_schema = '{self._schema}'
               AND tc.table_name = '{table_name}'
               AND tc.constraint_type = 'PRIMARY KEY'
-            ORDER BY kcu.ordinal_position
         """
-        rows = self.spark.sql(query).collect()
+        try:
+            rows = self._client.fetchall(sql)
+        except Exception:
+            return None
 
         if not rows:
             return None
 
-        columns = [row.column_name for row in rows]
-        rely = rows[0].enforced == "YES" if rows else False
-
+        columns = [row["column_name"] for row in rows]
+        rely = rows[0].get("rely", False)
         return PrimaryKey(columns=columns, rely=rely)
 
-    def _get_foreign_key_for_column(
-        self, table_name: str, column_name: str
-    ) -> Optional[ForeignKey]:
-        """Get foreign key reference for a specific column."""
-        query = f"""
-            SELECT
-                ccu.table_name AS referenced_table,
-                ccu.column_name AS referenced_column
-            FROM {self.catalog}.information_schema.referential_constraints rc
-            JOIN {self.catalog}.information_schema.key_column_usage kcu
-              ON rc.constraint_catalog = kcu.constraint_catalog
-              AND rc.constraint_schema = kcu.constraint_schema
-              AND rc.constraint_name = kcu.constraint_name
-            JOIN {self.catalog}.information_schema.constraint_column_usage ccu
-              ON rc.unique_constraint_catalog = ccu.constraint_catalog
-              AND rc.unique_constraint_schema = ccu.constraint_schema
-              AND rc.unique_constraint_name = ccu.constraint_name
-            WHERE kcu.table_schema = '{self.schema}'
-              AND kcu.table_name = '{table_name}'
-              AND kcu.column_name = '{column_name}'
+    def _fetch_check_constraints(self, table_name: str) -> list[CheckConstraint]:
+        """Fetch CHECK constraints."""
+        sql = f"""
+            SELECT constraint_name, constraint_type, check_clause
+            FROM {self._catalog}.information_schema.table_constraints
+            WHERE table_schema = '{self._schema}'
+              AND table_name = '{table_name}'
+              AND constraint_type = 'CHECK'
         """
-        rows = self.spark.sql(query).collect()
+        try:
+            rows = self._client.fetchall(sql)
+        except Exception:
+            return []
 
-        if not rows:
-            return None
-
-        return ForeignKey(
-            table=rows[0].referenced_table,
-            column=rows[0].referenced_column,
-        )
-
-    def _get_check_constraints(self, table_name: str) -> list[CheckConstraint]:
-        """Get CHECK constraints from table properties."""
-        fqn = f"{self.catalog}.{self.schema}.{table_name}"
-        rows = self.spark.sql(f"SHOW TBLPROPERTIES {fqn}").collect()
-
-        constraints = []
-        for row in rows:
-            if row.key.startswith("delta.constraints."):
-                name = row.key.replace("delta.constraints.", "")
-                constraints.append(CheckConstraint(name=name, expression=row.value))
-
-        return constraints
-
-    def _get_table_properties(self, table_name: str) -> dict[str, str]:
-        """Get table properties via SHOW TBLPROPERTIES."""
-        fqn = f"{self.catalog}.{self.schema}.{table_name}"
-        rows = self.spark.sql(f"SHOW TBLPROPERTIES {fqn}").collect()
-
-        keep_prefixes = [
-            "delta.enableChangeDataFeed",
-            "delta.autoOptimize",
-            "delta.columnMapping",
-            "delta.minReaderVersion",
-            "delta.minWriterVersion",
+        return [
+            CheckConstraint(name=row["constraint_name"], expression=row["check_clause"])
+            for row in rows
         ]
 
-        props = {}
-        for row in rows:
-            if any(row.key.startswith(p) for p in keep_prefixes):
-                props[row.key] = row.value
-
-        return props
-
-    def _get_clustering(self, table_name: str) -> list[str]:
-        """Get liquid clustering columns from DESCRIBE DETAIL."""
-        fqn = f"{self.catalog}.{self.schema}.{table_name}"
+    def _fetch_table_properties(self, table_name: str) -> dict[str, str]:
+        """Fetch table properties using SHOW TBLPROPERTIES."""
+        sql = f"SHOW TBLPROPERTIES `{self._catalog}`.`{self._schema}`.`{table_name}`"
         try:
-            detail = self.spark.sql(f"DESCRIBE DETAIL {fqn}").collect()[0]
-            if hasattr(detail, "clusteringColumns") and detail.clusteringColumns:
-                return list(detail.clusteringColumns)
+            rows = self._client.fetchall(sql)
         except Exception:
-            pass
-        return []
+            return {}
 
-    def _get_partitioning(self, table_name: str) -> list[str]:
-        """Get partition columns from DESCRIBE DETAIL."""
-        fqn = f"{self.catalog}.{self.schema}.{table_name}"
-        try:
-            detail = self.spark.sql(f"DESCRIBE DETAIL {fqn}").collect()[0]
-            if hasattr(detail, "partitionColumns") and detail.partitionColumns:
-                return list(detail.partitionColumns)
-        except Exception:
-            pass
-        return []
+        return {row["key"]: row["value"] for row in rows}
+
+    def _parse_clustering_columns(self, table_info: dict) -> list[str]:
+        """Parse clustering columns from table info."""
+        clustering = table_info.get("clustering_columns")
+        if not clustering:
+            return []
+
+        if isinstance(clustering, list):
+            return [str(c).strip() for c in clustering if str(c).strip()]
+
+        text = str(clustering).strip()
+
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    return [str(c).strip() for c in parsed if str(c).strip()]
+            except Exception:
+                pass
+
+        return [c.strip() for c in text.split(",") if c.strip()]
+
+    def _fetch_all_table_names(self) -> list[str]:
+        """Fetch all table names in the schema."""
+        sql = f"""
+            SELECT table_name
+            FROM {self._catalog}.information_schema.tables
+            WHERE table_schema = '{self._schema}'
+        """
+        rows = self._client.fetchall(sql)
+        return [row["table_name"] for row in rows]
