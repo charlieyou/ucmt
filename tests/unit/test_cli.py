@@ -67,10 +67,10 @@ columns:
             with patch("builtins.print"):
                 result = cmd_diff(args)
 
-        assert result == 1
+        assert result == 2  # ConfigError returns exit code 2
 
-    def test_diff_online_uses_get_current_schema_online(self, tmp_path):
-        """Online mode should use _get_current_schema_online helper."""
+    def test_diff_online_uses_get_online_schema(self, tmp_path):
+        """Online mode should use get_online_schema helper."""
         schema_dir = tmp_path / "schema"
         schema_dir.mkdir()
         (schema_dir / "users.yaml").write_text(
@@ -87,9 +87,8 @@ columns:
         mock_schema = Schema(tables={})
 
         with (
-            patch(
-                "ucmt.cli._get_current_schema_online", return_value=mock_schema
-            ) as mock_get,
+            patch("ucmt.cli.get_online_schema", return_value=mock_schema) as mock_get,
+            patch("ucmt.cli.build_config_from_env_and_validate"),
             patch("builtins.print") as mock_print,
         ):
             result = cmd_diff(args)
@@ -99,7 +98,7 @@ columns:
         mock_print.assert_any_call("Found 1 changes (online mode):")
 
     def test_diff_online_returns_1_when_introspection_fails(self, tmp_path):
-        """Online mode should return 1 if _get_current_schema_online returns None."""
+        """Online mode should return 1 if get_online_schema raises an exception."""
         schema_dir = tmp_path / "schema"
         schema_dir.mkdir()
         (schema_dir / "users.yaml").write_text(
@@ -113,7 +112,14 @@ columns:
 
         args = argparse.Namespace(schema_path=schema_dir, online=True)
 
-        with patch("ucmt.cli._get_current_schema_online", return_value=None):
+        with (
+            patch(
+                "ucmt.cli.get_online_schema",
+                side_effect=Exception("Connection failed"),
+            ),
+            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("builtins.print"),
+        ):
             result = cmd_diff(args)
 
         assert result == 1
@@ -136,7 +142,10 @@ columns:
         )
 
         args = argparse.Namespace(
-            schema_path=schema_dir, online=False, description="Add users table"
+            schema_path=schema_dir,
+            online=False,
+            description="Add users table",
+            allow_destructive=False,
         )
 
         with patch("builtins.print") as mock_print:
@@ -164,17 +173,20 @@ columns:
         )
 
         args = argparse.Namespace(
-            schema_path=schema_dir, online=True, description="Add users table"
+            schema_path=schema_dir,
+            online=True,
+            description="Add users table",
+            allow_destructive=False,
         )
 
         with patch.dict("os.environ", {}, clear=True):
             with patch("builtins.print"):
                 result = cmd_generate(args)
 
-        assert result == 1
+        assert result == 2  # ConfigError returns exit code 2
 
-    def test_generate_online_uses_get_current_schema_online(self, tmp_path):
-        """Online mode should use _get_current_schema_online helper."""
+    def test_generate_online_uses_get_online_schema(self, tmp_path):
+        """Online mode should use get_online_schema helper."""
         schema_dir = tmp_path / "schema"
         schema_dir.mkdir()
         (schema_dir / "users.yaml").write_text(
@@ -187,15 +199,17 @@ columns:
         )
 
         args = argparse.Namespace(
-            schema_path=schema_dir, online=True, description="Add users table"
+            schema_path=schema_dir,
+            online=True,
+            description="Add users table",
+            allow_destructive=False,
         )
 
         mock_schema = Schema(tables={})
 
         with (
-            patch(
-                "ucmt.cli._get_current_schema_online", return_value=mock_schema
-            ) as mock_get,
+            patch("ucmt.cli.get_online_schema", return_value=mock_schema) as mock_get,
+            patch("ucmt.cli.Config.from_env"),
             patch("builtins.print") as mock_print,
         ):
             result = cmd_generate(args)
@@ -204,63 +218,3 @@ columns:
         assert result == 0
         printed_output = " ".join(str(call) for call in mock_print.call_args_list)
         assert "CREATE TABLE" in printed_output
-
-
-class TestCmdStatus:
-    """Test cmd_status displays failed migrations correctly."""
-
-    def test_status_shows_failed_migrations(self, tmp_path):
-        """Status should show ✗ failed for migrations with success=False."""
-        from datetime import datetime
-        from unittest.mock import MagicMock
-
-        from ucmt.cli import cmd_status
-        from ucmt.migrations.state import AppliedMigration
-
-        migrations_dir = tmp_path / "sql" / "migrations"
-        migrations_dir.mkdir(parents=True)
-        (migrations_dir / "V001__create_users.sql").write_text(
-            "CREATE TABLE users (id INT);"
-        )
-        (migrations_dir / "V002__add_email.sql").write_text(
-            "ALTER TABLE users ADD email STRING;"
-        )
-
-        args = argparse.Namespace(migrations_path=migrations_dir)
-
-        mock_state_store = MagicMock()
-        mock_state_store.__enter__ = MagicMock(return_value=mock_state_store)
-        mock_state_store.__exit__ = MagicMock(return_value=False)
-        mock_state_store.list_applied.return_value = [
-            AppliedMigration(
-                version=1,
-                name="create_users",
-                checksum="abc",
-                applied_at=datetime.now(),
-                success=True,
-            ),
-            AppliedMigration(
-                version=2,
-                name="add_email",
-                checksum="def",
-                applied_at=datetime.now(),
-                success=False,
-                error="syntax error",
-            ),
-        ]
-
-        with (
-            patch(
-                "ucmt.migrations.state.DatabricksMigrationStateStore",
-                return_value=mock_state_store,
-            ),
-            patch("ucmt.cli.Config.from_env"),
-            patch("ucmt.cli._validate_db_config", return_value=True),
-            patch("builtins.print") as mock_print,
-        ):
-            result = cmd_status(args)
-
-        assert result == 0
-        printed_calls = [str(call) for call in mock_print.call_args_list]
-        printed_output = " ".join(printed_calls)
-        assert "V2" in printed_output and "✗ failed" in printed_output

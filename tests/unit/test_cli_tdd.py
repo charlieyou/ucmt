@@ -53,9 +53,17 @@ class TestCliApply:
             allow_destructive=False,
         )
 
+        mock_config = MagicMock()
+        mock_config.catalog = "test_catalog"
+        mock_config.schema = "test_schema"
+        mock_config.databricks_host = "host"
+        mock_config.databricks_token = "token"
+        mock_config.databricks_http_path = "/sql/1.0"
+
         with (
-            patch("ucmt.cli._validate_db_config", return_value=True),
-            patch("ucmt.cli.Config.from_env") as mock_config,
+            patch(
+                "ucmt.cli.build_config_from_env_and_validate", return_value=mock_config
+            ),
             patch(
                 "ucmt.migrations.state.DatabricksMigrationStateStore",
             ) as mock_store_cls,
@@ -65,11 +73,6 @@ class TestCliApply:
                 return_value=mock_state_store
             )
             mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-            mock_config.return_value.catalog = "test_catalog"
-            mock_config.return_value.schema = "test_schema"
-            mock_config.return_value.databricks_host = "host"
-            mock_config.return_value.databricks_token = "token"
-            mock_config.return_value.databricks_http_path = "/sql/1.0"
 
             mock_client = MagicMock()
             mock_client_cls.return_value.__enter__.return_value = mock_client
@@ -177,8 +180,7 @@ class TestCliPlan:
         args = argparse.Namespace(migrations_path=migrations_dir)
 
         with (
-            patch("ucmt.cli._validate_db_config", return_value=True),
-            patch("ucmt.cli.Config.from_env"),
+            patch("ucmt.cli.build_config_from_env_and_validate"),
             patch(
                 "ucmt.migrations.state.DatabricksMigrationStateStore",
             ) as mock_store_cls,
@@ -221,13 +223,15 @@ class TestCliStatus:
         args = argparse.Namespace(migrations_path=migrations_dir)
 
         with (
-            patch("ucmt.cli._validate_db_config", return_value=True),
-            patch("ucmt.cli.Config.from_env"),
+            patch("ucmt.cli.build_config_from_env_and_validate"),
             patch(
                 "ucmt.migrations.state.DatabricksMigrationStateStore",
-                return_value=mock_state_store,
-            ),
+            ) as mock_store_cls,
         ):
+            mock_store_cls.return_value.__enter__ = MagicMock(
+                return_value=mock_state_store
+            )
+            mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
             result = cmd_status(args)
 
         assert result == 0
