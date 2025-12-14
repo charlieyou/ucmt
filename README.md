@@ -1,8 +1,26 @@
 # UCMT: Unity Catalog Migration Tool
 
-> ⚠️ **Work in Progress** — This project is under active development and not yet ready for production use.
+> ⚠️ **Work in Progress** — Core functionality is implemented. Integration testing with real Databricks environments is ongoing.
 
 A SQL migration system for Databricks that integrates with Databricks Asset Bundles (DABs). Uses **declarative YAML schema files** as the source of truth.
+
+## Status
+
+**Implemented:**
+- ✅ YAML schema loader with validation
+- ✅ Schema diff engine (detects adds, drops, type changes)
+- ✅ SQL migration codegen from schema changes
+- ✅ Migration file parser (V###__name.sql format)
+- ✅ Migration runner with state tracking
+- ✅ Databricks client and state store
+- ✅ Schema introspection from Unity Catalog
+- ✅ CLI commands: `diff`, `generate`, `run`, `status`, `validate`
+- ✅ Online mode (`--online`) for diffing against live database
+
+**Planned:**
+- 🔲 `pull` command to generate YAML from existing schema
+- 🔲 DAB integration and wheel packaging
+- 🔲 Multi-catalog/schema directory structure
 
 ## Core Concepts
 
