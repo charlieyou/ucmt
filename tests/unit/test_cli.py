@@ -268,8 +268,7 @@ class TestCmdStatus:
                 "ucmt.migrations.state.DatabricksMigrationStateStore",
                 return_value=mock_state_store,
             ),
-            patch("ucmt.cli.Config.from_env"),
-            patch("ucmt.cli._validate_db_config", return_value=True),
+            patch("ucmt.cli.build_config_from_env_and_validate"),
             patch("builtins.print") as mock_print,
         ):
             result = cmd_status(args)
@@ -284,7 +283,7 @@ class TestCmdPull:
     """Test cmd_pull command."""
 
     def test_pull_requires_db_config(self, tmp_path):
-        """Pull should fail if DB config is missing."""
+        """Pull should fail with exit code 2 if DB config is missing."""
         output_dir = tmp_path / "schema"
         args = argparse.Namespace(output=output_dir, stamp=False)
 
@@ -292,7 +291,7 @@ class TestCmdPull:
             with patch("builtins.print"):
                 result = cmd_pull(args)
 
-        assert result == 1
+        assert result == 2
 
     def test_pull_creates_yaml_files(self, tmp_path):
         """Pull should create YAML files for each table."""
@@ -308,25 +307,12 @@ class TestCmdPull:
             }
         )
 
-        with patch.dict(
-            "os.environ",
-            {
-                "UCMT_CATALOG": "test_catalog",
-                "UCMT_SCHEMA": "test_schema",
-                "DATABRICKS_HOST": "test.cloud.databricks.com",
-                "DATABRICKS_TOKEN": "test_token",
-                "DATABRICKS_HTTP_PATH": "/sql/1.0/warehouses/abc123",
-            },
+        with (
+            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("ucmt.cli.get_online_schema", return_value=mock_schema),
+            patch("builtins.print"),
         ):
-            with patch("ucmt.databricks.client.DatabricksClient"):
-                with patch(
-                    "ucmt.schema.introspect.SchemaIntrospector"
-                ) as mock_introspector_class:
-                    mock_introspector = mock_introspector_class.return_value
-                    mock_introspector.introspect_schema.return_value = mock_schema
-
-                    with patch("builtins.print"):
-                        result = cmd_pull(args)
+            result = cmd_pull(args)
 
         assert result == 0
         assert (output_dir / "users.yaml").exists()
@@ -338,24 +324,11 @@ class TestCmdPull:
 
         empty_schema = Schema(tables={})
 
-        with patch.dict(
-            "os.environ",
-            {
-                "UCMT_CATALOG": "test_catalog",
-                "UCMT_SCHEMA": "test_schema",
-                "DATABRICKS_HOST": "test.cloud.databricks.com",
-                "DATABRICKS_TOKEN": "test_token",
-                "DATABRICKS_HTTP_PATH": "/sql/1.0/warehouses/abc123",
-            },
+        with (
+            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("ucmt.cli.get_online_schema", return_value=empty_schema),
+            patch("builtins.print"),
         ):
-            with patch("ucmt.databricks.client.DatabricksClient"):
-                with patch(
-                    "ucmt.schema.introspect.SchemaIntrospector"
-                ) as mock_introspector_class:
-                    mock_introspector = mock_introspector_class.return_value
-                    mock_introspector.introspect_schema.return_value = empty_schema
-
-                    with patch("builtins.print"):
-                        result = cmd_pull(args)
+            result = cmd_pull(args)
 
         assert result == 1

@@ -7,6 +7,7 @@ from ucmt.schema.exporter import (
     export_table_yaml,
     table_to_dict,
 )
+from ucmt.schema.loader import load_schema
 from ucmt.schema.models import (
     CheckConstraint,
     Column,
@@ -218,3 +219,52 @@ class TestExportSchemaToDirectory:
         assert parsed["table"] == "users"
         assert len(parsed["columns"]) == 2
         assert parsed["primary_key"]["columns"] == ["id"]
+
+    def test_roundtrip_export_then_load(self, tmp_path):
+        """Exported YAML can be loaded back with identical schema."""
+        original_schema = Schema(
+            tables={
+                "users": Table(
+                    name="users",
+                    columns=[
+                        Column(name="id", type="BIGINT", nullable=False),
+                        Column(name="email", type="STRING", comment="User email"),
+                        Column(name="status", type="STRING", default="'active'"),
+                    ],
+                    primary_key=PrimaryKey(columns=["id"], rely=True),
+                    check_constraints=[
+                        CheckConstraint(
+                            name="email_not_empty", expression="email != ''"
+                        )
+                    ],
+                    liquid_clustering=["id"],
+                    table_properties={"delta.columnMapping.mode": "name"},
+                    comment="User accounts table",
+                ),
+            }
+        )
+        output_dir = tmp_path / "schema"
+        export_schema_to_directory(original_schema, output_dir)
+
+        loaded_schema = load_schema(output_dir)
+
+        assert loaded_schema.table_names() == original_schema.table_names()
+        original_table = original_schema.get_table("users")
+        loaded_table = loaded_schema.get_table("users")
+        assert loaded_table.name == original_table.name
+        assert len(loaded_table.columns) == len(original_table.columns)
+        assert loaded_table.primary_key == original_table.primary_key
+        assert loaded_table.liquid_clustering == original_table.liquid_clustering
+        assert loaded_table.table_properties == original_table.table_properties
+
+    def test_liquid_clustering_truncates_over_4(self, tmp_path, caplog):
+        """Liquid clustering > 4 columns is truncated with warning."""
+        table = Table(
+            name="events",
+            columns=[Column(name="id", type="BIGINT")],
+            liquid_clustering=["a", "b", "c", "d", "e"],
+        )
+        result = table_to_dict(table)
+
+        assert result["liquid_clustering"] == ["a", "b", "c", "d"]
+        assert "Truncating to first 4" in caplog.text

@@ -1,11 +1,14 @@
 """Export schema models to YAML files."""
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from ucmt.schema.models import Column, Schema, Table
+
+logger = logging.getLogger(__name__)
 
 
 def table_to_dict(table: Table) -> dict[str, Any]:
@@ -33,7 +36,14 @@ def table_to_dict(table: Table) -> dict[str, Any]:
         ]
 
     if table.liquid_clustering:
-        data["liquid_clustering"] = table.liquid_clustering
+        if len(table.liquid_clustering) > 4:
+            logger.warning(
+                f"Table '{table.name}' has {len(table.liquid_clustering)} liquid clustering columns, "
+                "but loader only supports up to 4. Truncating to first 4."
+            )
+            data["liquid_clustering"] = table.liquid_clustering[:4]
+        else:
+            data["liquid_clustering"] = table.liquid_clustering
 
     if table.partitioned_by:
         data["partitioned_by"] = table.partitioned_by

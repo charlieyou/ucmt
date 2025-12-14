@@ -388,41 +388,30 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_pull(args: argparse.Namespace) -> int:
     """Pull schema from database and generate YAML files."""
     try:
-        from ucmt.databricks.client import DatabricksClient
         from ucmt.schema.exporter import export_schema_to_directory
-        from ucmt.schema.introspect import SchemaIntrospector
 
-        config = Config.from_env()
-        if not _validate_db_config(config):
+        config = build_config_from_env_and_validate()
+        schema = get_online_schema(config)
+
+        if not schema.tables:
+            print(
+                f"No tables found in {config.catalog}.{config.schema}",
+                file=sys.stderr,
+            )
             return 1
 
-        with DatabricksClient(
-            host=config.databricks_host,
-            token=config.databricks_token,
-            http_path=config.databricks_http_path,
-        ) as client:
-            introspector = SchemaIntrospector(client, config.catalog, config.schema)
-            schema = introspector.introspect_schema()
+        created_files = export_schema_to_directory(schema, args.output)
 
-            if not schema.tables:
-                print(
-                    f"No tables found in {config.catalog}.{config.schema}",
-                    file=sys.stderr,
-                )
-                return 1
+        print(f"Pulled {len(created_files)} table(s) to {args.output}:")
+        for file_path in created_files:
+            print(f"  - {file_path.name}")
 
-            created_files = export_schema_to_directory(schema, args.output)
+        if args.stamp:
+            print(
+                "\nNote: --stamp flag set but stamp functionality not yet implemented"
+            )
 
-            print(f"Pulled {len(created_files)} table(s) to {args.output}:")
-            for file_path in created_files:
-                print(f"  - {file_path.name}")
-
-            if args.stamp:
-                print(
-                    "\nNote: --stamp flag set but stamp functionality not yet implemented"
-                )
-
-            return 0
+        return 0
     except ConfigError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         return 2
