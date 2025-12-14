@@ -36,11 +36,14 @@ class DatabricksClient:
             raise RuntimeError("Not connected. Call connect() first.")
         self._cursor.execute(sql_statement, *args, **kwargs)
 
-    def fetchall(self, sql_statement: str, *args: Any, **kwargs: Any) -> list:
+    def fetchall(
+        self, sql_statement: str, *args: Any, **kwargs: Any
+    ) -> list[dict[str, Any]]:
         if self._cursor is None:
             raise RuntimeError("Not connected. Call connect() first.")
         self._cursor.execute(sql_statement, *args, **kwargs)
-        return self._cursor.fetchall()
+        rows = self._cursor.fetchall()
+        return [row.asDict() if hasattr(row, "asDict") else dict(row) for row in rows]
 
     def close(self) -> None:
         if self._cursor is not None:
