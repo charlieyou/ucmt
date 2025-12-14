@@ -1,0 +1,47 @@
+table: transactions
+description: Financial transactions
+
+columns:
+  - name: id
+    type: BIGINT
+    generated: ALWAYS AS IDENTITY
+    nullable: false
+
+  - name: user_id
+    type: BIGINT
+    nullable: false
+    foreign_key:
+      table: users
+      column: id
+
+  - name: amount
+    type: DECIMAL(18, 8)
+    nullable: false
+
+  - name: currency
+    type: STRING
+    nullable: false
+
+  - name: tx_type
+    type: STRING
+    nullable: false
+    check: "tx_type IN ('deposit', 'withdrawal', 'transfer', 'fee')"
+
+  - name: tx_date
+    type: DATE
+    nullable: false
+
+  - name: created_at
+    type: TIMESTAMP
+    nullable: false
+    default: current_timestamp()
+
+primary_key:
+  columns: [id]
+  rely: true
+
+liquid_clustering: [user_id, tx_date]
+
+table_properties:
+  delta.enableChangeDataFeed: "true"
+  delta.columnMapping.mode: "name"

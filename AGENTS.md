@@ -1,3 +1,14 @@
+## Development with uv
+
+```bash
+uv sync                  # Install dependencies
+uv run pytest            # Run tests
+uv run ucmt              # Run CLI
+uv add <package>         # Add dependency
+uv run ruff check .      # Lint
+uv run ruff format .     # Format
+```
+
 ## Issue Tracking with bd (beads)
 
 Use **bd** for ALL issue tracking. No markdown TODOs.
