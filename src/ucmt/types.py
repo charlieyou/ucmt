@@ -1,8 +1,7 @@
 """Core type definitions for ucmt."""
 
-from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, TypeAlias
+from typing import TypeAlias
 
 TableName: TypeAlias = str
 ColumnName: TypeAlias = str
@@ -29,16 +28,3 @@ class ChangeType(Enum):
     ALTER_CLUSTERING = "alter_clustering"
     ALTER_PARTITIONING = "alter_partitioning"
     ALTER_TABLE_PROPERTIES = "alter_table_properties"
-
-
-@dataclass
-class SchemaChange:
-    """Represents a single schema change detected by the differ."""
-
-    change_type: ChangeType
-    table_name: str
-    details: dict[str, Any] = field(default_factory=dict)
-    is_destructive: bool = False
-    is_unsupported: bool = False
-    error_message: str | None = None
-    requires_column_mapping: bool = False
