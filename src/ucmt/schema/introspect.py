@@ -101,7 +101,9 @@ class SchemaIntrospector:
     def _is_valid_table(self, table_info: dict) -> bool:
         """Check if table is a valid Delta table (not view, temp, streaming)."""
         table_type = (table_info.get("table_type") or "").upper()
-        data_source_format = (table_info.get("data_source_format") or "").strip().upper()
+        data_source_format = (
+            (table_info.get("data_source_format") or "").strip().upper()
+        )
 
         if table_type not in self.VALID_TABLE_TYPES:
             return False

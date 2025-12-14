@@ -8,6 +8,11 @@ from ucmt.schema.models import (
     Schema,
     Table,
 )
+from ucmt.schema.validator import (
+    SchemaValidator,
+    ValidationIssue,
+    ValidationResult,
+)
 
 __all__ = [
     "CheckConstraint",
@@ -15,5 +20,8 @@ __all__ = [
     "ForeignKey",
     "PrimaryKey",
     "Schema",
+    "SchemaValidator",
     "Table",
+    "ValidationIssue",
+    "ValidationResult",
 ]
