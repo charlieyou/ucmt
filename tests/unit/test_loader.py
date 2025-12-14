@@ -211,3 +211,45 @@ def test_loader_parses_foreign_key_to_model():
     assert user_id_col.foreign_key is not None
     assert user_id_col.foreign_key.table == "users"
     assert user_id_col.foreign_key.column == "id"
+
+
+def test_loader_yaml_parse_error_raises_SchemaLoadError():
+    """Test that invalid YAML syntax raises SchemaLoadError."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_file = Path(tmpdir) / "bad.yaml"
+        yaml_file.write_text("""
+table: test
+columns:
+  - name: id
+    type: BIGINT
+  invalid yaml here: [unclosed bracket
+""")
+        with pytest.raises(SchemaLoadError, match="(?i)yaml.*parse|invalid.*yaml"):
+            load_schema(yaml_file)
+
+
+def test_loader_non_mapping_yaml_top_level_raises_SchemaLoadError():
+    """Test that non-dict top-level YAML raises SchemaLoadError."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_file = Path(tmpdir) / "bad.yaml"
+        yaml_file.write_text("""
+- item1
+- item2
+""")
+        with pytest.raises(SchemaLoadError, match="(?i)must be.*mapping|dict"):
+            load_schema(yaml_file)
+
+
+def test_loader_tables_field_must_be_list():
+    """Test that 'tables' field must be a list."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yaml_file = Path(tmpdir) / "bad.yaml"
+        yaml_file.write_text("""
+tables:
+  users:
+    columns:
+      - name: id
+        type: BIGINT
+""")
+        with pytest.raises(SchemaLoadError, match="(?i)tables.*must be.*list"):
+            load_schema(yaml_file)
