@@ -1,68 +1,37 @@
 # UCMT: Unity Catalog Migration Tool
 
-> ⚠️ **Work in Progress** — Core functionality is implemented. Integration testing with real Databricks environments is ongoing.
-
 A SQL migration system for Databricks that integrates with Databricks Asset Bundles (DABs). Uses **declarative YAML schema files** as the source of truth.
 
-## Status
+## Features
 
-**Implemented:**
-- ✅ YAML schema loader with validation
-- ✅ Schema diff engine (detects adds, drops, type changes)
-- ✅ SQL migration codegen from schema changes
-- ✅ Migration file parser (V###__name.sql format)
-- ✅ Migration runner with state tracking
-- ✅ Databricks client and state store
-- ✅ Schema introspection from Unity Catalog
-- ✅ CLI commands: `diff`, `generate`, `run`, `status`, `validate`
-- ✅ Online mode (`--online`) for diffing against live database
+- **YAML schema loader** with validation
+- **Schema diff engine** (detects adds, drops, type changes)
+- **SQL migration codegen** from schema changes
+- **Migration file parser** (V###__name.sql format)
+- **Migration runner** with state tracking
+- **Databricks client** and state store
+- **Schema introspection** from Unity Catalog
+- **Pull command** to generate YAML from existing schema
 
-**Planned:**
-- 🔲 `pull` command to generate YAML from existing schema
-- 🔲 DAB integration and wheel packaging
-- 🔲 Multi-catalog/schema directory structure
-
-## Core Concepts
-
-- **Auto-generate migrations** by diffing declared schema vs. current database state
-- **Validate migrations** to ensure they produce the declared schema
-- **Execute migrations** with proper state tracking
-
-Follows patterns from Prisma, Atlas, and Alembic autogenerate.
-
-## Databricks/Unity Catalog Constraints
-
-| Feature             | Support          | Notes                                       |
-| ------------------- | ---------------- | ------------------------------------------- |
-| PRIMARY KEY         | ✅ Informational | **Not enforced** — optimizer hints only     |
-| FOREIGN KEY         | ✅ Informational | **Not enforced** — no referential integrity |
-| CHECK constraints   | ✅ Enforced      | Transactions fail on violation              |
-| NOT NULL            | ✅ Enforced      |                                             |
-| Traditional indexes | ❌               | Use liquid clustering instead               |
-| UNIQUE constraints  | ❌               | Enforce at application level                |
-| Liquid clustering   | ✅               | Replaces partitioning + Z-ORDER             |
-| Change partitioning | ❌               | Requires table recreation                   |
-| DROP COLUMN         | ✅               | Requires column mapping mode                |
-| Type widening       | ✅ Limited       | INT→BIGINT, FLOAT→DOUBLE, etc.              |
-| Type narrowing      | ❌               | Not supported                               |
-
-## Planned CLI Commands
+## CLI Commands
 
 ```bash
-ucmt generate "description"        # Generate migration from schema diff (offline)
-ucmt generate "desc" --online      # Generate migration comparing against actual DB
+ucmt validate                      # Validate schema files
 ucmt diff                          # Show diff vs empty schema (offline)
 ucmt diff --online                 # Show diff vs actual database state
-ucmt run                           # Run pending migrations
-ucmt validate                      # Validate schema files
+ucmt generate "description"        # Generate migration from schema diff (offline)
+ucmt generate "desc" --online      # Generate migration comparing against actual DB
 ucmt pull                          # Pull current DB schema to YAML
 ucmt status                        # Show applied migrations
+ucmt plan                          # Show pending migrations
+ucmt run                           # Run pending migrations
+ucmt run --dry-run                 # Preview migrations without executing
 ```
 
 ### Offline vs Online Mode
 
 - **Offline mode (default)**: Compares declared YAML schema against an empty schema. Useful for generating initial migrations or when DB access is not available.
-- **Online mode (`--online`)**: Compares declared YAML schema against the actual database state using introspection. Requires `DATABRICKS_*` environment variables to be set.
+- **Online mode (`--online`)**: Compares declared YAML schema against the actual database state using introspection. Requires Databricks connection.
 
 ## Schema Definition (YAML)
 
