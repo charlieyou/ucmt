@@ -264,27 +264,33 @@ def cmd_status(args: argparse.Namespace) -> int:
 
             try:
                 applied = state_store.list_applied()
-                applied_versions = {m.version for m in applied}
+                applied_by_version = {m.version: m for m in applied}
             except Exception as e:
                 print(f"Error reading migration state: {e}", file=sys.stderr)
                 return 1
 
+            versions_on_disk = {m.version for m in all_migrations}
+            applied_known = {
+                v: m for v, m in applied_by_version.items() if v in versions_on_disk
+            }
+
             print(f"Migrations in {migrations_path}:")
             for migration in all_migrations:
-                status = (
-                    "✓ applied"
-                    if migration.version in applied_versions
-                    else "○ pending"
-                )
+                if migration.version in applied_known:
+                    applied_migration = applied_known[migration.version]
+                    status = "✓ applied" if applied_migration.success else "✗ failed"
+                else:
+                    status = "○ pending"
                 print(f"  V{migration.version}: {migration.name} [{status}]")
 
             pending_count = sum(
-                1 for m in all_migrations if m.version not in applied_versions
+                1 for m in all_migrations if m.version not in applied_known
             )
-            applied_count = len(applied_versions)
+            failed_count = sum(1 for m in applied_known.values() if not m.success)
+            applied_count = len(applied_known) - failed_count
             print(
                 f"\nTotal: {len(all_migrations)} migrations "
-                f"({applied_count} applied, {pending_count} pending)"
+                f"({applied_count} applied, {failed_count} failed, {pending_count} pending)"
             )
 
             return 0
