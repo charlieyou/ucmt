@@ -303,3 +303,47 @@ class TestIdempotency:
                     success=True,
                     error=None,
                 )
+
+
+class TestConnectionLifecycle:
+    def test_close_closes_connection(
+        self, config: Config, mock_connection: MagicMock, mock_cursor: MagicMock
+    ):
+        with patch("ucmt.migrations.state.sql.connect") as mock_connect:
+            mock_connect.return_value = mock_connection
+            store = DatabricksMigrationStateStore(config)
+            store.close()
+
+        mock_connection.close.assert_called_once()
+
+    def test_close_is_idempotent(
+        self, config: Config, mock_connection: MagicMock, mock_cursor: MagicMock
+    ):
+        with patch("ucmt.migrations.state.sql.connect") as mock_connect:
+            mock_connect.return_value = mock_connection
+            store = DatabricksMigrationStateStore(config)
+            store.close()
+            store.close()
+
+        mock_connection.close.assert_called_once()
+
+    def test_context_manager_closes_on_exit(
+        self, config: Config, mock_connection: MagicMock, mock_cursor: MagicMock
+    ):
+        with patch("ucmt.migrations.state.sql.connect") as mock_connect:
+            mock_connect.return_value = mock_connection
+            with DatabricksMigrationStateStore(config) as store:
+                assert store is not None
+
+        mock_connection.close.assert_called_once()
+
+    def test_context_manager_closes_on_exception(
+        self, config: Config, mock_connection: MagicMock, mock_cursor: MagicMock
+    ):
+        with patch("ucmt.migrations.state.sql.connect") as mock_connect:
+            mock_connect.return_value = mock_connection
+            with pytest.raises(ValueError):
+                with DatabricksMigrationStateStore(config):
+                    raise ValueError("test error")
+
+        mock_connection.close.assert_called_once()
