@@ -7,6 +7,17 @@ from ucmt.cli import cmd_diff, cmd_generate, cmd_pull
 from ucmt.schema.models import Column, Schema, Table
 
 
+def make_db_args(**kwargs):
+    """Create argparse.Namespace with default DB connection args."""
+    defaults = {
+        "catalog": None,
+        "db_schema": None,
+        "profile": "DEFAULT",
+    }
+    defaults.update(kwargs)
+    return argparse.Namespace(**defaults)
+
+
 class TestCmdDiffOffline:
     """Test cmd_diff in offline mode (default)."""
 
@@ -23,7 +34,7 @@ columns:
 """
         )
 
-        args = argparse.Namespace(schema_path=schema_dir, online=False)
+        args = make_db_args(schema_path=schema_dir, online=False)
 
         with patch("builtins.print") as mock_print:
             result = cmd_diff(args)
@@ -36,7 +47,7 @@ columns:
         schema_dir = tmp_path / "schema"
         schema_dir.mkdir()
 
-        args = argparse.Namespace(schema_path=schema_dir, online=False)
+        args = make_db_args(schema_path=schema_dir, online=False)
 
         with patch("builtins.print") as mock_print:
             result = cmd_diff(args)
@@ -61,7 +72,7 @@ columns:
 """
         )
 
-        args = argparse.Namespace(schema_path=schema_dir, online=True)
+        args = make_db_args(schema_path=schema_dir, online=True)
 
         with patch.dict("os.environ", {}, clear=True):
             with patch("builtins.print"):
@@ -82,13 +93,13 @@ columns:
 """
         )
 
-        args = argparse.Namespace(schema_path=schema_dir, online=True)
+        args = make_db_args(schema_path=schema_dir, online=True)
 
         mock_schema = Schema(tables={})
 
         with (
             patch("ucmt.cli.get_online_schema", return_value=mock_schema) as mock_get,
-            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("ucmt.cli.build_config_and_validate"),
             patch("builtins.print") as mock_print,
         ):
             result = cmd_diff(args)
@@ -110,14 +121,14 @@ columns:
 """
         )
 
-        args = argparse.Namespace(schema_path=schema_dir, online=True)
+        args = make_db_args(schema_path=schema_dir, online=True)
 
         with (
             patch(
                 "ucmt.cli.get_online_schema",
                 side_effect=Exception("Connection failed"),
             ),
-            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("ucmt.cli.build_config_and_validate"),
             patch("builtins.print"),
         ):
             result = cmd_diff(args)
@@ -141,7 +152,7 @@ columns:
 """
         )
 
-        args = argparse.Namespace(
+        args = make_db_args(
             schema_path=schema_dir,
             online=False,
             description="Add users table",
@@ -172,7 +183,7 @@ columns:
 """
         )
 
-        args = argparse.Namespace(
+        args = make_db_args(
             schema_path=schema_dir,
             online=True,
             description="Add users table",
@@ -198,7 +209,7 @@ columns:
 """
         )
 
-        args = argparse.Namespace(
+        args = make_db_args(
             schema_path=schema_dir,
             online=True,
             description="Add users table",
@@ -240,7 +251,7 @@ class TestCmdStatus:
             "ALTER TABLE users ADD email STRING;"
         )
 
-        args = argparse.Namespace(migrations_path=migrations_dir)
+        args = make_db_args(migrations_path=migrations_dir)
 
         mock_state_store = MagicMock()
         mock_state_store.__enter__ = MagicMock(return_value=mock_state_store)
@@ -268,7 +279,7 @@ class TestCmdStatus:
                 "ucmt.migrations.state.DatabricksMigrationStateStore",
                 return_value=mock_state_store,
             ),
-            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("ucmt.cli.build_config_and_validate"),
             patch("builtins.print") as mock_print,
         ):
             result = cmd_status(args)
@@ -285,7 +296,7 @@ class TestCmdPull:
     def test_pull_requires_db_config(self, tmp_path):
         """Pull should fail with exit code 2 if DB config is missing."""
         output_dir = tmp_path / "schema"
-        args = argparse.Namespace(output=output_dir, stamp=False)
+        args = make_db_args(output=output_dir, stamp=False)
 
         with patch.dict("os.environ", {}, clear=True):
             with patch("builtins.print"):
@@ -296,7 +307,7 @@ class TestCmdPull:
     def test_pull_creates_yaml_files(self, tmp_path):
         """Pull should create YAML files for each table."""
         output_dir = tmp_path / "schema"
-        args = argparse.Namespace(output=output_dir, stamp=False)
+        args = make_db_args(output=output_dir, stamp=False)
 
         mock_schema = Schema(
             tables={
@@ -308,7 +319,7 @@ class TestCmdPull:
         )
 
         with (
-            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("ucmt.cli.build_config_and_validate"),
             patch("ucmt.cli.get_online_schema", return_value=mock_schema),
             patch("builtins.print"),
         ):
@@ -320,12 +331,12 @@ class TestCmdPull:
     def test_pull_returns_error_when_no_tables(self, tmp_path):
         """Pull should return error if no tables found."""
         output_dir = tmp_path / "schema"
-        args = argparse.Namespace(output=output_dir, stamp=False)
+        args = make_db_args(output=output_dir, stamp=False)
 
         empty_schema = Schema(tables={})
 
         with (
-            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("ucmt.cli.build_config_and_validate"),
             patch("ucmt.cli.get_online_schema", return_value=empty_schema),
             patch("builtins.print"),
         ):

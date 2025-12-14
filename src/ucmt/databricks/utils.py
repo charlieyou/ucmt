@@ -3,12 +3,24 @@
 Extracts common DB logic from CLI for reuse and testability.
 """
 
+from typing import Optional
+
 from ucmt.config import Config
 from ucmt.schema.models import Schema
 
 
-def build_config_from_env_and_validate() -> Config:
-    """Load config from environment and validate for DB operations.
+def build_config_and_validate(
+    *,
+    catalog: Optional[str] = None,
+    schema: Optional[str] = None,
+    profile: Optional[str] = None,
+) -> Config:
+    """Load config from ~/.databrickscfg/env and validate for DB operations.
+
+    Args:
+        catalog: Catalog name (overrides env/config)
+        schema: Schema name (overrides env/config)
+        profile: Databricks config profile name
 
     Returns:
         Config: Validated configuration.
@@ -16,9 +28,17 @@ def build_config_from_env_and_validate() -> Config:
     Raises:
         ConfigError: If required configuration is missing.
     """
-    config = Config.from_env()
+    config = Config.from_env(catalog=catalog, schema=schema, profile=profile)
     config.validate_for_db_ops()
     return config
+
+
+def build_config_from_env_and_validate() -> Config:
+    """Load config from environment and validate for DB operations.
+
+    Deprecated: Use build_config_and_validate() instead.
+    """
+    return build_config_and_validate()
 
 
 def get_online_schema(config: Config) -> Schema:

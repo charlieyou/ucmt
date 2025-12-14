@@ -10,6 +10,17 @@ from ucmt.exceptions import ConfigError
 from ucmt.migrations.state import AppliedMigration
 
 
+def make_db_args(**kwargs):
+    """Create argparse.Namespace with default DB connection args."""
+    defaults = {
+        "catalog": None,
+        "db_schema": None,
+        "profile": "DEFAULT",
+    }
+    defaults.update(kwargs)
+    return argparse.Namespace(**defaults)
+
+
 class TestCliHelp:
     """Test CLI help and command discovery."""
 
@@ -47,7 +58,7 @@ class TestCliApply:
         mock_state_store.has_applied.return_value = False
         mock_state_store.list_applied.return_value = []
 
-        args = argparse.Namespace(
+        args = make_db_args(
             migrations_path=migrations_dir,
             dry_run=False,
             allow_destructive=False,
@@ -61,9 +72,7 @@ class TestCliApply:
         mock_config.databricks_http_path = "/sql/1.0"
 
         with (
-            patch(
-                "ucmt.cli.build_config_from_env_and_validate", return_value=mock_config
-            ),
+            patch("ucmt.cli.build_config_and_validate", return_value=mock_config),
             patch(
                 "ucmt.migrations.state.DatabricksMigrationStateStore",
             ) as mock_store_cls,
@@ -101,7 +110,7 @@ columns:
 
         from ucmt.cli import cmd_generate
 
-        args = argparse.Namespace(
+        args = make_db_args(
             schema_path=schema_dir,
             online=False,
             description="add_users_table",
@@ -151,7 +160,7 @@ columns:
 
         from ucmt.cli import cmd_diff
 
-        args = argparse.Namespace(schema_path=schema_dir, online=False)
+        args = make_db_args(schema_path=schema_dir, online=False)
         result = cmd_diff(args)
 
         assert result == 0
@@ -177,10 +186,10 @@ class TestCliPlan:
         mock_state_store.list_applied.return_value = []
         mock_state_store.has_applied.return_value = False
 
-        args = argparse.Namespace(migrations_path=migrations_dir)
+        args = make_db_args(migrations_path=migrations_dir)
 
         with (
-            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("ucmt.cli.build_config_and_validate"),
             patch(
                 "ucmt.migrations.state.DatabricksMigrationStateStore",
             ) as mock_store_cls,
@@ -220,10 +229,10 @@ class TestCliStatus:
             )
         ]
 
-        args = argparse.Namespace(migrations_path=migrations_dir)
+        args = make_db_args(migrations_path=migrations_dir)
 
         with (
-            patch("ucmt.cli.build_config_from_env_and_validate"),
+            patch("ucmt.cli.build_config_and_validate"),
             patch(
                 "ucmt.migrations.state.DatabricksMigrationStateStore",
             ) as mock_store_cls,
@@ -282,13 +291,13 @@ columns:
 
         from ucmt.cli import cmd_run
 
-        args = argparse.Namespace(
+        args = make_db_args(
             migrations_path=migrations_dir,
             dry_run=False,
             allow_destructive=False,
         )
 
-        with patch("ucmt.cli.Config.from_env") as mock_config:
+        with patch("ucmt.cli.build_config_and_validate") as mock_config:
             mock_config.side_effect = ConfigError("Missing catalog")
             result = cmd_run(args)
 
@@ -338,7 +347,7 @@ class TestCliDestructiveOperations:
         from ucmt.schema.models import Schema
         from ucmt.types import ChangeType
 
-        args = argparse.Namespace(
+        args = make_db_args(
             schema_path=schema_dir,
             online=False,
             description="drop_users_table",
@@ -379,7 +388,7 @@ class TestCliDestructiveOperations:
         from ucmt.schema.models import Schema
         from ucmt.types import ChangeType
 
-        args = argparse.Namespace(
+        args = make_db_args(
             schema_path=schema_dir,
             online=False,
             description="drop_users_table",
@@ -421,7 +430,7 @@ class TestCliDestructiveOperations:
         from ucmt.schema.models import Schema
         from ucmt.types import ChangeType
 
-        args = argparse.Namespace(
+        args = make_db_args(
             schema_path=schema_dir,
             online=False,
             description="drop_column",

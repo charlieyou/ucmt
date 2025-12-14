@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ucmt.config import Config
 from ucmt.databricks.utils import (
-    build_config_from_env_and_validate,
+    build_config_and_validate,
     get_online_schema,
     split_sql_statements,
 )
@@ -16,6 +16,24 @@ from ucmt.schema.codegen import MigrationGenerator
 from ucmt.schema.diff import SchemaDiffer
 from ucmt.schema.loader import load_schema
 from ucmt.schema.models import Schema
+
+
+def add_db_args(parser: argparse.ArgumentParser) -> None:
+    """Add common database connection arguments to a parser."""
+    parser.add_argument(
+        "--catalog",
+        help="Unity Catalog name (or set UCMT_CATALOG)",
+    )
+    parser.add_argument(
+        "--schema",
+        dest="db_schema",
+        help="Schema name (or set UCMT_SCHEMA)",
+    )
+    parser.add_argument(
+        "--profile",
+        default="DEFAULT",
+        help="Databricks config profile from ~/.databrickscfg (default: DEFAULT)",
+    )
 
 
 def main() -> int:
@@ -35,6 +53,7 @@ def main() -> int:
         action="store_true",
         help="Compare against actual database state (requires DB connection)",
     )
+    add_db_args(diff_parser)
 
     generate_parser = subparsers.add_parser("generate", help="Generate migration")
     generate_parser.add_argument("description", help="Migration description")
@@ -56,6 +75,7 @@ def main() -> int:
         type=Path,
         help="Output file path (default: stdout)",
     )
+    add_db_args(generate_parser)
 
     validate_parser = subparsers.add_parser("validate", help="Validate schema files")
     validate_parser.add_argument(
@@ -66,11 +86,13 @@ def main() -> int:
     status_parser.add_argument(
         "--migrations-path", type=Path, default=Path("sql/migrations")
     )
+    add_db_args(status_parser)
 
     plan_parser = subparsers.add_parser("plan", help="Show pending migrations")
     plan_parser.add_argument(
         "--migrations-path", type=Path, default=Path("sql/migrations")
     )
+    add_db_args(plan_parser)
 
     run_parser = subparsers.add_parser("run", help="Run pending migrations")
     run_parser.add_argument(
@@ -81,6 +103,7 @@ def main() -> int:
         action="store_true",
         help="Show pending migrations without executing",
     )
+    add_db_args(run_parser)
 
     pull_parser = subparsers.add_parser(
         "pull", help="Pull schema from database and generate YAML files"
@@ -96,6 +119,7 @@ def main() -> int:
         action="store_true",
         help="Mark current state as baseline (no migrations needed)",
     )
+    add_db_args(pull_parser)
 
     args = parser.parse_args()
 
@@ -138,7 +162,11 @@ def cmd_diff(args: argparse.Namespace) -> int:
         declared = load_schema(args.schema_path)
 
         if args.online:
-            config = build_config_from_env_and_validate()
+            config = build_config_and_validate(
+                catalog=args.catalog,
+                schema=args.db_schema,
+                profile=args.profile,
+            )
             current = get_online_schema(config)
         else:
             current = Schema(tables={})
@@ -168,7 +196,11 @@ def cmd_diff(args: argparse.Namespace) -> int:
 def cmd_generate(args: argparse.Namespace) -> int:
     """Generate migration from diff."""
     try:
-        config = Config.from_env()
+        config = Config.from_env(
+            catalog=args.catalog,
+            schema=args.db_schema,
+            profile=args.profile,
+        )
         declared = load_schema(args.schema_path)
 
         if args.online:
@@ -227,7 +259,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         from ucmt.migrations.parser import parse_migrations_dir
         from ucmt.migrations.state import DatabricksMigrationStateStore
 
-        config = build_config_from_env_and_validate()
+        config = build_config_and_validate(
+            catalog=args.catalog,
+            schema=args.db_schema,
+            profile=args.profile,
+        )
 
         with DatabricksMigrationStateStore(config) as state_store:
             migrations_path = args.migrations_path
@@ -286,7 +322,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
         from ucmt.migrations.runner import plan
         from ucmt.migrations.state import DatabricksMigrationStateStore
 
-        config = build_config_from_env_and_validate()
+        config = build_config_and_validate(
+            catalog=args.catalog,
+            schema=args.db_schema,
+            profile=args.profile,
+        )
 
         with DatabricksMigrationStateStore(config) as state_store:
             migrations_path = args.migrations_path
@@ -322,7 +362,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         from ucmt.migrations.runner import Runner, plan
         from ucmt.migrations.state import DatabricksMigrationStateStore
 
-        config = build_config_from_env_and_validate()
+        config = build_config_and_validate(
+            catalog=args.catalog,
+            schema=args.db_schema,
+            profile=args.profile,
+        )
 
         with DatabricksMigrationStateStore(config) as state_store:
             migrations_path = args.migrations_path
@@ -390,7 +434,11 @@ def cmd_pull(args: argparse.Namespace) -> int:
     try:
         from ucmt.schema.exporter import export_schema_to_directory
 
-        config = build_config_from_env_and_validate()
+        config = build_config_and_validate(
+            catalog=args.catalog,
+            schema=args.db_schema,
+            profile=args.profile,
+        )
         schema = get_online_schema(config)
 
         if not schema.tables:
