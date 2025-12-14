@@ -188,7 +188,12 @@ def cmd_diff(args: argparse.Namespace) -> int:
 def cmd_generate(args: argparse.Namespace) -> int:
     """Generate migration from diff."""
     try:
-        config = Config.from_env()
+        try:
+            config = Config.from_env()
+        except ConfigError as e:
+            print(f"Configuration error: {e}", file=sys.stderr)
+            return 2
+
         declared = load_schema(args.schema_path)
 
         if args.online:
@@ -302,6 +307,10 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
         migrations_path = args.migrations_path
         all_migrations = parse_migrations_dir(migrations_path)
+
+        if not all_migrations:
+            print(f"No migrations found in {migrations_path}")
+            return 0
 
         pending = plan(all_migrations, state_store)
 
