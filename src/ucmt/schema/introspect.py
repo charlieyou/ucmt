@@ -28,6 +28,17 @@ class SchemaIntrospector:
         self._catalog = catalog
         self._schema = schema
 
+    def _row_get(self, row, key: str, default=None):
+        """Get value from row, handling different row types (dict, PySpark Row, etc.)."""
+        if hasattr(row, "get"):
+            return row.get(key, default)
+        if hasattr(row, "asDict"):
+            return row.asDict().get(key, default)
+        try:
+            return row[key]
+        except (KeyError, TypeError):
+            return default
+
     def introspect_table(self, table_name: str) -> Table | None:
         """Introspect a single table. Returns None if not found or not a Delta table."""
         table_info = self._fetch_table_info(table_name)
