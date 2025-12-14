@@ -6,54 +6,16 @@ import sys
 from pathlib import Path
 
 from ucmt.config import Config
+from ucmt.databricks.utils import (
+    build_config_from_env_and_validate,
+    get_online_schema,
+    split_sql_statements,
+)
 from ucmt.exceptions import ConfigError
 from ucmt.schema.codegen import MigrationGenerator
 from ucmt.schema.diff import SchemaDiffer
 from ucmt.schema.loader import load_schema
 from ucmt.schema.models import Schema
-
-
-def _validate_db_config(config: Config) -> bool:
-    """Validate that all required DB config is present."""
-    missing = []
-    if not config.catalog:
-        missing.append("UCMT_CATALOG")
-    if not config.schema:
-        missing.append("UCMT_SCHEMA")
-    if not config.databricks_host:
-        missing.append("DATABRICKS_HOST")
-    if not config.databricks_http_path:
-        missing.append("DATABRICKS_HTTP_PATH")
-    if not config.databricks_token:
-        missing.append("DATABRICKS_TOKEN")
-
-    if missing:
-        print(
-            "Error: missing required environment variables: " + ", ".join(missing),
-            file=sys.stderr,
-        )
-        return False
-    return True
-
-
-def _get_current_schema_online(config: Config) -> Schema | None:
-    """Get current schema from database via introspection.
-
-    Returns None if there's an error (error message already printed to stderr).
-    """
-    from ucmt.databricks.client import DatabricksClient
-    from ucmt.schema.introspect import SchemaIntrospector
-
-    if not _validate_db_config(config):
-        return None
-
-    with DatabricksClient(
-        host=config.databricks_host,
-        token=config.databricks_token,
-        http_path=config.databricks_http_path,
-    ) as client:
-        introspector = SchemaIntrospector(client, config.catalog, config.schema)
-        return introspector.introspect_schema()
 
 
 def main() -> int:
@@ -159,10 +121,8 @@ def cmd_diff(args: argparse.Namespace) -> int:
         declared = load_schema(args.schema_path)
 
         if args.online:
-            config = Config.from_env()
-            current = _get_current_schema_online(config)
-            if current is None:
-                return 1
+            config = build_config_from_env_and_validate()
+            current = get_online_schema(config)
         else:
             current = Schema(tables={})
 
@@ -180,6 +140,9 @@ def cmd_diff(args: argparse.Namespace) -> int:
             print(f"  {prefix}{change.change_type.value}: {change.table_name}")
 
         return 0
+    except ConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
     except Exception as e:
         print(f"Diff error: {e}", file=sys.stderr)
         return 1
@@ -188,18 +151,12 @@ def cmd_diff(args: argparse.Namespace) -> int:
 def cmd_generate(args: argparse.Namespace) -> int:
     """Generate migration from diff."""
     try:
-        try:
-            config = Config.from_env()
-        except ConfigError as e:
-            print(f"Configuration error: {e}", file=sys.stderr)
-            return 2
-
+        config = Config.from_env()
         declared = load_schema(args.schema_path)
 
         if args.online:
-            current = _get_current_schema_online(config)
-            if current is None:
-                return 1
+            config.validate_for_db_ops()
+            current = get_online_schema(config)
         else:
             current = Schema(tables={})
 
@@ -230,6 +187,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
         sql = generator.generate(changes, args.description)
         print(sql)
         return 0
+    except ConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
     except Exception as e:
         print(f"Generation error: {e}", file=sys.stderr)
         return 1
@@ -250,9 +210,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         from ucmt.migrations.parser import parse_migrations_dir
         from ucmt.migrations.state import DatabricksMigrationStateStore
 
-        config = Config.from_env()
-        if not _validate_db_config(config):
-            return 1
+        config = build_config_from_env_and_validate()
 
         with DatabricksMigrationStateStore(config) as state_store:
             migrations_path = args.migrations_path
@@ -264,36 +222,41 @@ def cmd_status(args: argparse.Namespace) -> int:
 
             try:
                 applied = state_store.list_applied()
-                applied_by_version = {m.version: m for m in applied}
+                applied_versions = {m.version for m in applied}
+                failed_versions = {m.version for m in applied if not m.success}
             except Exception as e:
                 print(f"Error reading migration state: {e}", file=sys.stderr)
                 return 1
 
-            versions_on_disk = {m.version for m in all_migrations}
-            applied_known = {
-                v: m for v, m in applied_by_version.items() if v in versions_on_disk
-            }
-
             print(f"Migrations in {migrations_path}:")
             for migration in all_migrations:
-                if migration.version in applied_known:
-                    applied_migration = applied_known[migration.version]
-                    status = "✓ applied" if applied_migration.success else "✗ failed"
+                if migration.version in failed_versions:
+                    status = "✗ failed"
+                elif migration.version in applied_versions:
+                    status = "✓ applied"
                 else:
                     status = "○ pending"
                 print(f"  V{migration.version}: {migration.name} [{status}]")
 
             pending_count = sum(
-                1 for m in all_migrations if m.version not in applied_known
+                1 for m in all_migrations if m.version not in applied_versions
             )
-            failed_count = sum(1 for m in applied_known.values() if not m.success)
-            applied_count = len(applied_known) - failed_count
+            applied_count = sum(
+                1 for m in all_migrations if m.version in applied_versions
+            )
+            failed_count = sum(
+                1 for m in all_migrations if m.version in failed_versions
+            )
             print(
                 f"\nTotal: {len(all_migrations)} migrations "
-                f"({applied_count} applied, {failed_count} failed, {pending_count} pending)"
+                f"({applied_count} applied, {pending_count} pending"
+                + (f", {failed_count} failed)" if failed_count else ")")
             )
 
             return 0
+    except ConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
     except Exception as e:
         print(f"Status error: {e}", file=sys.stderr)
         return 1
@@ -306,9 +269,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         from ucmt.migrations.runner import plan
         from ucmt.migrations.state import DatabricksMigrationStateStore
 
-        config = Config.from_env()
-        if not _validate_db_config(config):
-            return 1
+        config = build_config_from_env_and_validate()
 
         with DatabricksMigrationStateStore(config) as state_store:
             migrations_path = args.migrations_path
@@ -344,9 +305,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         from ucmt.migrations.runner import Runner, plan
         from ucmt.migrations.state import DatabricksMigrationStateStore
 
-        config = Config.from_env()
-        if not _validate_db_config(config):
-            return 1
+        config = build_config_from_env_and_validate()
 
         with DatabricksMigrationStateStore(config) as state_store:
             migrations_path = args.migrations_path
@@ -382,10 +341,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             ) as client:
 
                 def executor(sql: str, version: int) -> None:
-                    statements = [s.strip() for s in sql.split(";") if s.strip()]
-                    for stmt in statements:
-                        if stmt and not stmt.startswith("--"):
-                            client.execute(stmt)
+                    for stmt in split_sql_statements(sql):
+                        client.execute(stmt)
 
                 runner = Runner(
                     state_store=state_store,
