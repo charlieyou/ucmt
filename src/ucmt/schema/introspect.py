@@ -1,7 +1,7 @@
 """Schema introspection from Unity Catalog using DatabricksClient."""
 
 import json
-from typing import Any, Protocol
+from typing import Protocol
 
 from ucmt.schema.models import (
     CheckConstraint,
@@ -27,17 +27,6 @@ class SchemaIntrospector:
         self._client = client
         self._catalog = catalog
         self._schema = schema
-
-    def _row_get(self, row: Any, key: str, default: Any = None) -> Any:
-        """Safely get a value from a row, supporting dict-like and pyspark Row."""
-        if hasattr(row, "get"):
-            return row.get(key, default)
-        if hasattr(row, "asDict"):
-            return row.asDict().get(key, default)
-        try:
-            return row[key]
-        except Exception:
-            return default
 
     def introspect_table(self, table_name: str) -> Table | None:
         """Introspect a single table. Returns None if not found or not a Delta table."""

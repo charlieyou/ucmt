@@ -1,5 +1,12 @@
 # Databricks SQL Migration Runner - Implementation Plan (v3 - Corrected)
 
+> **Note:** This is an initial design document from early development. The actual implementation has diverged in several ways:
+> - Package name is `ucmt` (not `db_migrate`)
+> - Uses `databricks-sql-connector` instead of Spark for introspection
+> - CLI semantics differ (e.g., `validate` currently only checks YAML syntax)
+>
+> See `ucmt --help` and module docstrings for current behavior.
+
 ## Overview
 
 Build a SQL migration system for Databricks that integrates with Databricks Asset Bundles (DABs). The system uses **declarative schema files** as the source of truth and can:
