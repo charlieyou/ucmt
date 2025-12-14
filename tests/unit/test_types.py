@@ -1,6 +1,7 @@
 """Tests for ucmt.types module."""
 
-from ucmt.types import ChangeType, SchemaChange
+from ucmt.schema.diff import SchemaChange
+from ucmt.types import ChangeType
 
 
 class TestSchemaChange:
