@@ -204,3 +204,63 @@ columns:
         assert result == 0
         printed_output = " ".join(str(call) for call in mock_print.call_args_list)
         assert "CREATE TABLE" in printed_output
+
+
+class TestCmdStatus:
+    """Test cmd_status displays failed migrations correctly."""
+
+    def test_status_shows_failed_migrations(self, tmp_path):
+        """Status should show ✗ failed for migrations with success=False."""
+        from datetime import datetime
+        from unittest.mock import MagicMock
+
+        from ucmt.cli import cmd_status
+        from ucmt.migrations.state import AppliedMigration
+
+        migrations_dir = tmp_path / "sql" / "migrations"
+        migrations_dir.mkdir(parents=True)
+        (migrations_dir / "V001__create_users.sql").write_text(
+            "CREATE TABLE users (id INT);"
+        )
+        (migrations_dir / "V002__add_email.sql").write_text(
+            "ALTER TABLE users ADD email STRING;"
+        )
+
+        args = argparse.Namespace(migrations_path=migrations_dir)
+
+        mock_state_store = MagicMock()
+        mock_state_store.__enter__ = MagicMock(return_value=mock_state_store)
+        mock_state_store.__exit__ = MagicMock(return_value=False)
+        mock_state_store.list_applied.return_value = [
+            AppliedMigration(
+                version=1,
+                name="create_users",
+                checksum="abc",
+                applied_at=datetime.now(),
+                success=True,
+            ),
+            AppliedMigration(
+                version=2,
+                name="add_email",
+                checksum="def",
+                applied_at=datetime.now(),
+                success=False,
+                error="syntax error",
+            ),
+        ]
+
+        with (
+            patch(
+                "ucmt.migrations.state.DatabricksMigrationStateStore",
+                return_value=mock_state_store,
+            ),
+            patch("ucmt.cli.Config.from_env"),
+            patch("ucmt.cli._validate_db_config", return_value=True),
+            patch("builtins.print") as mock_print,
+        ):
+            result = cmd_status(args)
+
+        assert result == 0
+        printed_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = " ".join(printed_calls)
+        assert "V2" in printed_output and "✗ failed" in printed_output
