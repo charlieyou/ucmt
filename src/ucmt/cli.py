@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 from ucmt.config import Config
+from ucmt.databricks.client import DatabricksClient
+from ucmt.exceptions import ConfigError
 from ucmt.schema.codegen import MigrationGenerator
 from ucmt.schema.diff import SchemaDiffer
 from ucmt.schema.loader import load_schema
@@ -40,7 +42,6 @@ def _get_current_schema_online(config: Config) -> Schema | None:
 
     Returns None if there's an error (error message already printed to stderr).
     """
-    from ucmt.databricks.client import DatabricksClient
     from ucmt.schema.introspect import SchemaIntrospector
 
     if not _validate_db_config(config):
@@ -53,6 +54,11 @@ def _get_current_schema_online(config: Config) -> Schema | None:
     ) as client:
         introspector = SchemaIntrospector(client, config.catalog, config.schema)
         return introspector.introspect_schema()
+
+
+def _has_destructive_changes(changes: list) -> bool:
+    """Check if any changes are destructive."""
+    return any(getattr(c, "is_destructive", False) for c in changes)
 
 
 def main() -> int:
@@ -83,6 +89,11 @@ def main() -> int:
         action="store_true",
         help="Compare against actual database state (requires DB connection)",
     )
+    generate_parser.add_argument(
+        "--allow-destructive",
+        action="store_true",
+        help="Allow destructive changes (DROP TABLE, DROP COLUMN)",
+    )
 
     validate_parser = subparsers.add_parser("validate", help="Validate schema files")
     validate_parser.add_argument(
@@ -91,6 +102,11 @@ def main() -> int:
 
     status_parser = subparsers.add_parser("status", help="Show migration status")
     status_parser.add_argument(
+        "--migrations-path", type=Path, default=Path("sql/migrations")
+    )
+
+    plan_parser = subparsers.add_parser("plan", help="List pending migrations")
+    plan_parser.add_argument(
         "--migrations-path", type=Path, default=Path("sql/migrations")
     )
 
@@ -103,6 +119,11 @@ def main() -> int:
         action="store_true",
         help="Show pending migrations without executing",
     )
+    run_parser.add_argument(
+        "--allow-destructive",
+        action="store_true",
+        help="Allow destructive changes (DROP TABLE, DROP COLUMN)",
+    )
 
     args = parser.parse_args()
 
@@ -114,6 +135,8 @@ def main() -> int:
         return cmd_generate(args)
     elif args.command == "status":
         return cmd_status(args)
+    elif args.command == "plan":
+        return cmd_plan(args)
     elif args.command == "run":
         return cmd_run(args)
     else:
@@ -187,6 +210,18 @@ def cmd_generate(args: argparse.Namespace) -> int:
             print("No changes to generate")
             return 0
 
+        allow_destructive = getattr(args, "allow_destructive", False)
+        if _has_destructive_changes(changes) and not allow_destructive:
+            destructive = [c for c in changes if getattr(c, "is_destructive", False)]
+            print(
+                "Error: Migration contains destructive changes. "
+                "Use --allow-destructive to proceed.",
+                file=sys.stderr,
+            )
+            for c in destructive:
+                print(f"  - {c.change_type.value}: {c.table_name}", file=sys.stderr)
+            return 1
+
         generator = MigrationGenerator(
             catalog=config.catalog or "${catalog}",
             schema=config.schema or "${schema}",
@@ -251,8 +286,55 @@ def cmd_status(args: argparse.Namespace) -> int:
         )
 
         return 0
+    except ConfigError as e:
+        print(f"Config error: {e}", file=sys.stderr)
+        return 2
     except Exception as e:
         print(f"Status error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    """List pending migrations without applying."""
+    try:
+        from databricks import sql  # noqa: F401
+    except ImportError:
+        print(
+            "Error: databricks-sql-connector not installed. Run: pip install databricks-sql-connector",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        from ucmt.migrations.parser import parse_migrations_dir
+        from ucmt.migrations.runner import plan
+        from ucmt.migrations.state import DatabricksMigrationStateStore
+
+        config = Config.from_env()
+        if not _validate_db_config(config):
+            return 1
+
+        state_store = DatabricksMigrationStateStore(config)
+
+        migrations_path = args.migrations_path
+        all_migrations = parse_migrations_dir(migrations_path)
+
+        pending = plan(all_migrations, state_store)
+
+        if not pending:
+            print("No pending migrations")
+            return 0
+
+        print(f"Pending migrations ({len(pending)}):")
+        for pm in pending:
+            print(f"  V{pm.version}: {pm.name}")
+
+        return 0
+    except ConfigError as e:
+        print(f"Config error: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:
+        print(f"Plan error: {e}", file=sys.stderr)
         return 1
 
 
@@ -293,8 +375,6 @@ def cmd_run(args: argparse.Namespace) -> int:
             runner.apply(all_migrations, dry_run=True)
             return 0
 
-        from ucmt.databricks.client import DatabricksClient
-
         with DatabricksClient(
             host=config.databricks_host,
             token=config.databricks_token,
@@ -323,6 +403,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
             print(f"\nSuccessfully applied {len(pending)} migration(s)")
             return 0
+    except ConfigError as e:
+        print(f"Config error: {e}", file=sys.stderr)
+        return 2
     except Exception as e:
         print(f"Run error: {e}", file=sys.stderr)
         return 1
