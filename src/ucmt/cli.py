@@ -23,10 +23,14 @@ def main() -> int:
 
     generate_parser = subparsers.add_parser("generate", help="Generate migration")
     generate_parser.add_argument("description", help="Migration description")
-    generate_parser.add_argument("--schema-path", type=Path, default=Path("schema/tables"))
+    generate_parser.add_argument(
+        "--schema-path", type=Path, default=Path("schema/tables")
+    )
 
     validate_parser = subparsers.add_parser("validate", help="Validate schema files")
-    validate_parser.add_argument("--schema-path", type=Path, default=Path("schema/tables"))
+    validate_parser.add_argument(
+        "--schema-path", type=Path, default=Path("schema/tables")
+    )
 
     subparsers.add_parser("status", help="Show migration status")
     subparsers.add_parser("run", help="Run pending migrations")

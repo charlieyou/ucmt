@@ -19,6 +19,22 @@ class DiffError(UcmtError):
     """Error computing schema diff."""
 
 
+class MigrationError(UcmtError):
+    """Base error during migration execution or management."""
+
+
+class MigrationParseError(MigrationError):
+    """Error parsing migration file."""
+
+
+class MigrationStateConflictError(MigrationError):
+    """State conflict during migration."""
+
+
+class MigrationChecksumMismatchError(MigrationError):
+    """Migration checksum does not match recorded checksum."""
+
+
 class UnsupportedChangeError(UcmtError):
     """Change is not supported by Databricks/Delta Lake."""
 
@@ -27,12 +43,11 @@ class UnsupportedChangeError(UcmtError):
         super().__init__(message)
 
 
+UnsupportedSchemaChangeError = UnsupportedChangeError
+
+
 class CodegenError(UcmtError):
     """Error generating migration SQL."""
-
-
-class MigrationError(UcmtError):
-    """Error executing migration."""
 
 
 class ConfigError(UcmtError):

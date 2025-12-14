@@ -25,7 +25,9 @@ class MigrationRecord:
 class MigrationState:
     """Track applied migrations in a state table."""
 
-    def __init__(self, client: Any, catalog: str, schema: str, table: str = "_ucmt_migrations"):
+    def __init__(
+        self, client: Any, catalog: str, schema: str, table: str = "_ucmt_migrations"
+    ):
         self.client = client
         self.fqn = f"{catalog}.{schema}.{table}"
 

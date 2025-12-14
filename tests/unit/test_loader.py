@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 
 from ucmt.schema.loader import load_schema
 

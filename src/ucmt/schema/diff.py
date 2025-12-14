@@ -98,7 +98,9 @@ class SchemaDiffer:
 
         for col_name in set(source_cols) & set(target_cols):
             changes.extend(
-                self._diff_column(table_name, source_cols[col_name], target_cols[col_name])
+                self._diff_column(
+                    table_name, source_cols[col_name], target_cols[col_name]
+                )
             )
 
         return changes

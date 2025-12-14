@@ -13,7 +13,9 @@ class DatabricksClient:
         """Execute SQL and return results as list of dicts."""
         with self.connection.cursor() as cursor:
             cursor.execute(sql)
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            columns = (
+                [desc[0] for desc in cursor.description] if cursor.description else []
+            )
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     def execute_many(self, statements: list[str]) -> None:

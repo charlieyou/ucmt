@@ -180,7 +180,9 @@ class MigrationGenerator:
         to_default = change.details["to_default"]
 
         if to_default:
-            return f"ALTER TABLE {fqn} ALTER COLUMN {col_name} SET DEFAULT {to_default};"
+            return (
+                f"ALTER TABLE {fqn} ALTER COLUMN {col_name} SET DEFAULT {to_default};"
+            )
         else:
             return f"ALTER TABLE {fqn} ALTER COLUMN {col_name} DROP DEFAULT;"
 
