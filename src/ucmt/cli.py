@@ -119,11 +119,6 @@ def main() -> int:
         action="store_true",
         help="Show pending migrations without executing",
     )
-    run_parser.add_argument(
-        "--allow-destructive",
-        action="store_true",
-        help="Allow destructive changes (DROP TABLE, DROP COLUMN)",
-    )
 
     args = parser.parse_args()
 
