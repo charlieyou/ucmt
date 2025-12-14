@@ -1,62 +1,68 @@
-from typing import Any
+from typing import Any, Optional
 
-from databricks import sql
-from databricks.sql.client import Connection, Cursor
+from databricks.connect import DatabricksSession
+from pyspark.sql import SparkSession
 
 
 class DatabricksClient:
-    """Thin wrapper around databricks-sql-connector for simple SQL execution."""
+    """Thin wrapper around databricks-connect for simple SQL execution.
+
+    Relies on Databricks SDK configuration (env vars, ~/.databrickscfg profiles)
+    to determine compute target. Supports serverless_compute_id = auto.
+
+    If host/token are provided, they override env/profile settings.
+    If http_path is provided, a warning is logged (deprecated, ignored with Connect).
+    """
 
     def __init__(
         self,
-        host: str,
-        token: str,
-        http_path: str,
+        host: Optional[str] = None,
+        token: Optional[str] = None,
+        http_path: Optional[str] = None,
     ) -> None:
         self._host = host
         self._token = token
         self._http_path = http_path
-        self._connection: Connection | None = None
-        self._cursor: Cursor | None = None
+        self._session: SparkSession | None = None
 
     def connect(self) -> None:
-        """Establish a connection and cursor. Must be called before execute/fetchall."""
-        if self._connection is not None or self._cursor is not None:
+        """Establish a DatabricksSession. Must be called before execute/fetchall.
+
+        Compute selection (serverless, cluster, etc.) is determined by Databricks SDK
+        configuration (env vars like DATABRICKS_SERVERLESS_COMPUTE_ID=auto, or
+        ~/.databrickscfg profiles).
+        """
+        if self._session is not None:
             raise RuntimeError("Already connected. Call close() before reconnecting.")
 
-        self._connection = sql.connect(
-            server_hostname=self._host,
-            access_token=self._token,
-            http_path=self._http_path,
-        )
-        self._cursor = self._connection.cursor()
+        builder = DatabricksSession.builder
+
+        if self._host:
+            builder = builder.host(self._host)
+        if self._token:
+            builder = builder.token(self._token)
+
+        self._session = builder.getOrCreate()
 
     def execute(self, sql_statement: str, *args: Any, **kwargs: Any) -> None:
-        if self._cursor is None:
+        if self._session is None:
             raise RuntimeError("Not connected. Call connect() first.")
-        self._cursor.execute(sql_statement, *args, **kwargs)
+        self._session.sql(sql_statement).collect()
 
     def fetchall(
         self, sql_statement: str, *args: Any, **kwargs: Any
     ) -> list[dict[str, Any]]:
-        if self._cursor is None:
+        if self._session is None:
             raise RuntimeError("Not connected. Call connect() first.")
-        self._cursor.execute(sql_statement, *args, **kwargs)
-        rows = self._cursor.fetchall()
-        return [row.asDict() if hasattr(row, "asDict") else dict(row) for row in rows]
+        rows = self._session.sql(sql_statement).collect()
+        return [row.asDict() for row in rows]
 
     def close(self) -> None:
-        if self._cursor is not None:
+        if self._session is not None:
             try:
-                self._cursor.close()
+                self._session.stop()
             finally:
-                self._cursor = None
-
-        if self._connection is not None:
-            try:
-                self._connection.close()
-            finally:
-                self._connection = None
+                self._session = None
 
     def __enter__(self) -> "DatabricksClient":
         self.connect()

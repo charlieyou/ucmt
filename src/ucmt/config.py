@@ -144,10 +144,6 @@ class Config:
             missing.append("databricks_host (use --profile or DATABRICKS_HOST)")
         if not self.databricks_token:
             missing.append("databricks_token (use --profile or DATABRICKS_TOKEN)")
-        if not self.databricks_http_path:
-            missing.append(
-                "databricks_http_path (use --profile or DATABRICKS_HTTP_PATH)"
-            )
 
         if missing:
             raise ConfigError(

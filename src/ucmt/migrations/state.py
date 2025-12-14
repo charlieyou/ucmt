@@ -3,8 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
-from databricks import sql
-
+from ucmt.databricks.client import DatabricksClient
 from ucmt.exceptions import ConfigError, MigrationStateConflictError
 
 if TYPE_CHECKING:
@@ -18,6 +17,11 @@ def _validate_identifier(value: str, kind: str) -> str:
     if not _IDENTIFIER_RE.match(value):
         raise ConfigError(f"Invalid {kind} identifier: {value!r}")
     return value
+
+
+def _escape_sql_string(value: str) -> str:
+    """Escape single quotes for SQL string literals."""
+    return value.replace("'", "''")
 
 
 @dataclass
@@ -95,7 +99,6 @@ class InMemoryMigrationStateStore:
                     f"Migration {version} already recorded with checksum {existing.checksum}, "
                     f"but attempted to record with checksum {checksum}"
                 )
-            # Idempotent: same version & checksum -> do not overwrite existing state.
             return
 
         self._applied[version] = AppliedMigration(
@@ -129,11 +132,12 @@ class DatabricksMigrationStateStore:
         self._catalog = _validate_identifier(config.catalog, "catalog")
         self._schema = _validate_identifier(config.schema, "schema")
         self._state_table = _validate_identifier(config.state_table, "state_table")
-        self._connection = sql.connect(
-            server_hostname=config.databricks_host,
+        self._client = DatabricksClient(
+            host=config.databricks_host,
+            token=config.databricks_token,
             http_path=config.databricks_http_path,
-            access_token=config.databricks_token,
         )
+        self._client.connect()
         self._ensure_state_table()
 
     def __enter__(self) -> "DatabricksMigrationStateStore":
@@ -144,53 +148,47 @@ class DatabricksMigrationStateStore:
 
     def close(self) -> None:
         """Close the database connection."""
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None
+        self._client.close()
 
     @property
     def state_table_fqn(self) -> str:
         return f"{self._catalog}.{self._schema}.{self._state_table}"
 
     def _ensure_state_table(self) -> None:
-        with self._connection.cursor() as cursor:
-            cursor.execute(self._CREATE_TABLE_SQL.format(table=self.state_table_fqn))
+        self._client.execute(self._CREATE_TABLE_SQL.format(table=self.state_table_fqn))
 
     def list_applied(self) -> list[AppliedMigration]:
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                f"SELECT version, name, checksum, applied_at, success, error "
-                f"FROM {self.state_table_fqn} ORDER BY version ASC"
-            )
-            rows = cursor.fetchall()
+        rows = self._client.fetchall(
+            f"SELECT version, name, checksum, applied_at, success, error "
+            f"FROM {self.state_table_fqn} ORDER BY version ASC"
+        )
         return [
             AppliedMigration(
-                version=row[0],
-                name=row[1],
-                checksum=row[2],
-                applied_at=row[3],
-                success=row[4],
-                error=row[5],
+                version=row["version"],
+                name=row["name"],
+                checksum=row["checksum"],
+                applied_at=row["applied_at"],
+                success=row["success"],
+                error=row["error"],
             )
             for row in rows
         ]
 
     def get_last_applied(self) -> Optional[AppliedMigration]:
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                f"SELECT version, name, checksum, applied_at, success, error "
-                f"FROM {self.state_table_fqn} ORDER BY version DESC LIMIT 1"
-            )
-            row = cursor.fetchone()
-        if row is None:
+        rows = self._client.fetchall(
+            f"SELECT version, name, checksum, applied_at, success, error "
+            f"FROM {self.state_table_fqn} ORDER BY version DESC LIMIT 1"
+        )
+        if not rows:
             return None
+        row = rows[0]
         return AppliedMigration(
-            version=row[0],
-            name=row[1],
-            checksum=row[2],
-            applied_at=row[3],
-            success=row[4],
-            error=row[5],
+            version=row["version"],
+            name=row["name"],
+            checksum=row["checksum"],
+            applied_at=row["applied_at"],
+            success=row["success"],
+            error=row["error"],
         )
 
     def record_applied(
@@ -210,37 +208,36 @@ class DatabricksMigrationStateStore:
                 )
             return
 
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                f"INSERT INTO {self.state_table_fqn} "
-                f"(version, name, checksum, applied_at, success, error) VALUES "
-                f"(?, ?, ?, current_timestamp(), ?, ?)",
-                [version, name, checksum, success, error],
-            )
+        def q(v: str) -> str:
+            return "'" + _escape_sql_string(v) + "'"
+
+        error_value = q(error) if error is not None else "NULL"
+        success_value = "true" if success else "false"
+        self._client.execute(
+            f"INSERT INTO {self.state_table_fqn} "
+            f"(version, name, checksum, applied_at, success, error) VALUES "
+            f"({version}, {q(name)}, {q(checksum)}, current_timestamp(), {success_value}, {error_value})"
+        )
 
     def has_applied(self, version: int) -> bool:
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                f"SELECT version FROM {self.state_table_fqn} WHERE version = ?",
-                [version],
-            )
-            return cursor.fetchone() is not None
+        rows = self._client.fetchall(
+            f"SELECT version FROM {self.state_table_fqn} WHERE version = {version}"
+        )
+        return len(rows) > 0
 
     def _get_by_version(self, version: int) -> Optional[AppliedMigration]:
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                f"SELECT version, name, checksum, applied_at, success, error "
-                f"FROM {self.state_table_fqn} WHERE version = ?",
-                [version],
-            )
-            row = cursor.fetchone()
-        if row is None:
+        rows = self._client.fetchall(
+            f"SELECT version, name, checksum, applied_at, success, error "
+            f"FROM {self.state_table_fqn} WHERE version = {version}"
+        )
+        if not rows:
             return None
+        row = rows[0]
         return AppliedMigration(
-            version=row[0],
-            name=row[1],
-            checksum=row[2],
-            applied_at=row[3],
-            success=row[4],
-            error=row[5],
+            version=row["version"],
+            name=row["name"],
+            checksum=row["checksum"],
+            applied_at=row["applied_at"],
+            success=row["success"],
+            error=row["error"],
         )

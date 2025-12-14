@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pyyaml>=6.0",
-    "databricks-sql-connector>=3.0.0",
+    "databricks-connect>=15.0.0",
 ]
 
 [project.scripts]
