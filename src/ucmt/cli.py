@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from ucmt.config import Config
+from ucmt.exceptions import ConfigError
 from ucmt.schema.codegen import MigrationGenerator
 from ucmt.schema.diff import SchemaDiffer
 from ucmt.schema.loader import load_schema
@@ -83,6 +84,16 @@ def main() -> int:
         action="store_true",
         help="Compare against actual database state (requires DB connection)",
     )
+    generate_parser.add_argument(
+        "--allow-destructive",
+        action="store_true",
+        help="Allow destructive changes (DROP TABLE, DROP COLUMN, etc.)",
+    )
+    generate_parser.add_argument(
+        "--output",
+        type=Path,
+        help="Output file path (default: stdout)",
+    )
 
     validate_parser = subparsers.add_parser("validate", help="Validate schema files")
     validate_parser.add_argument(
@@ -91,6 +102,11 @@ def main() -> int:
 
     status_parser = subparsers.add_parser("status", help="Show migration status")
     status_parser.add_argument(
+        "--migrations-path", type=Path, default=Path("sql/migrations")
+    )
+
+    plan_parser = subparsers.add_parser("plan", help="Show pending migrations")
+    plan_parser.add_argument(
         "--migrations-path", type=Path, default=Path("sql/migrations")
     )
 
@@ -114,6 +130,8 @@ def main() -> int:
         return cmd_generate(args)
     elif args.command == "status":
         return cmd_status(args)
+    elif args.command == "plan":
+        return cmd_plan(args)
     elif args.command == "run":
         return cmd_run(args)
     else:
@@ -187,6 +205,19 @@ def cmd_generate(args: argparse.Namespace) -> int:
             print("No changes to generate")
             return 0
 
+        destructive_changes = [c for c in changes if c.is_destructive]
+        if destructive_changes and not args.allow_destructive:
+            print(
+                "Error: destructive changes detected. Use --allow-destructive to proceed.",
+                file=sys.stderr,
+            )
+            for change in destructive_changes:
+                print(
+                    f"  - {change.change_type.value}: {change.table_name}",
+                    file=sys.stderr,
+                )
+            return 1
+
         generator = MigrationGenerator(
             catalog=config.catalog or "${catalog}",
             schema=config.schema or "${schema}",
@@ -253,6 +284,41 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
     except Exception as e:
         print(f"Status error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    """Show pending migrations without executing."""
+    try:
+        from ucmt.migrations.parser import parse_migrations_dir
+        from ucmt.migrations.runner import plan
+        from ucmt.migrations.state import DatabricksMigrationStateStore
+
+        config = Config.from_env()
+        if not _validate_db_config(config):
+            return 1
+
+        state_store = DatabricksMigrationStateStore(config)
+
+        migrations_path = args.migrations_path
+        all_migrations = parse_migrations_dir(migrations_path)
+
+        pending = plan(all_migrations, state_store)
+
+        if not pending:
+            print("No pending migrations")
+            return 0
+
+        print(f"Pending migrations ({len(pending)}):")
+        for pm in pending:
+            print(f"  V{pm.version}: {pm.name}")
+
+        return 0
+    except ConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:
+        print(f"Plan error: {e}", file=sys.stderr)
         return 1
 
 
@@ -323,6 +389,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
             print(f"\nSuccessfully applied {len(pending)} migration(s)")
             return 0
+    except ConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
     except Exception as e:
         print(f"Run error: {e}", file=sys.stderr)
         return 1

@@ -2,7 +2,6 @@
 
 import argparse
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -61,7 +60,7 @@ class TestCliApply:
                 "ucmt.migrations.state.DatabricksMigrationStateStore",
                 return_value=mock_state_store,
             ),
-            patch("ucmt.cli.DatabricksClient") as mock_client_cls,
+            patch("ucmt.databricks.client.DatabricksClient") as mock_client_cls,
         ):
             mock_config.return_value.catalog = "test_catalog"
             mock_config.return_value.schema = "test_schema"
@@ -151,7 +150,9 @@ columns:
 
         assert result == 0
         captured = capsys.readouterr()
-        assert "changes" in captured.out.lower() or "create_table" in captured.out.lower()
+        assert (
+            "changes" in captured.out.lower() or "create_table" in captured.out.lower()
+        )
 
 
 class TestCliPlan:
@@ -353,7 +354,10 @@ class TestCliDestructiveOperations:
 
         assert result == 1
         captured = capsys.readouterr()
-        assert "destructive" in captured.err.lower() or "allow-destructive" in captured.err.lower()
+        assert (
+            "destructive" in captured.err.lower()
+            or "allow-destructive" in captured.err.lower()
+        )
 
     def test_cli_allows_destructive_with_flag(self, tmp_path, capsys):
         """CLI should allow DROP operations with --allow-destructive flag."""
