@@ -3,7 +3,6 @@
 import argparse
 import logging
 import sys
-from contextlib import closing
 from pathlib import Path
 
 from ucmt.config import Config
@@ -41,28 +40,17 @@ def _get_current_schema_online(config: Config) -> Schema | None:
 
     Returns None if there's an error (error message already printed to stderr).
     """
-    try:
-        from databricks import sql as databricks_sql  # noqa: F401
-    except ImportError:
-        print(
-            "Error: databricks-sql-connector not installed. "
-            "Run: pip install databricks-sql-connector",
-            file=sys.stderr,
-        )
-        return None
-
     from ucmt.databricks.client import DatabricksClient
     from ucmt.schema.introspect import SchemaIntrospector
 
     if not _validate_db_config(config):
         return None
 
-    client = DatabricksClient(
+    with DatabricksClient(
         host=config.databricks_host,
         token=config.databricks_token,
         http_path=config.databricks_http_path,
-    )
-    with client:
+    ) as client:
         introspector = SchemaIntrospector(client, config.catalog, config.schema)
         return introspector.introspect_schema()
 
@@ -271,16 +259,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     """Run pending migrations."""
     try:
-        from databricks import sql as databricks_sql
-    except ImportError:
-        print(
-            "Error: databricks-sql-connector not installed. Run: pip install databricks-sql-connector",
-            file=sys.stderr,
-        )
-        return 1
-
-    try:
-        from ucmt.client import DatabricksClient
+        from ucmt.databricks.client import DatabricksClient
         from ucmt.migrations.parser import parse_migrations_dir
         from ucmt.migrations.runner import Runner, plan
         from ucmt.migrations.state import DatabricksMigrationStateStore
@@ -291,15 +270,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         state_store = DatabricksMigrationStateStore(config)
 
-        with closing(
-            databricks_sql.connect(
-                server_hostname=config.databricks_host,
-                http_path=config.databricks_http_path,
-                access_token=config.databricks_token,
-            )
-        ) as connection:
-            client = DatabricksClient(connection)
-
+        with DatabricksClient(
+            host=config.databricks_host,
+            token=config.databricks_token,
+            http_path=config.databricks_http_path,
+        ) as client:
             migrations_path = args.migrations_path
             all_migrations = parse_migrations_dir(migrations_path)
 
