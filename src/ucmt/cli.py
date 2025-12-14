@@ -17,15 +17,15 @@ def _validate_db_config(config: Config) -> bool:
     """Validate that all required DB config is present."""
     missing = []
     if not config.catalog:
-        missing.append("DATABRICKS_CATALOG")
+        missing.append("UCMT_CATALOG")
     if not config.schema:
-        missing.append("DATABRICKS_SCHEMA")
-    if not config.server_hostname:
-        missing.append("DATABRICKS_SERVER_HOSTNAME")
-    if not config.http_path:
+        missing.append("UCMT_SCHEMA")
+    if not config.databricks_host:
+        missing.append("DATABRICKS_HOST")
+    if not config.databricks_http_path:
         missing.append("DATABRICKS_HTTP_PATH")
-    if not config.access_token:
-        missing.append("DATABRICKS_ACCESS_TOKEN")
+    if not config.databricks_token:
+        missing.append("DATABRICKS_TOKEN")
 
     if missing:
         print(
@@ -59,9 +59,9 @@ def _get_current_schema_online(config: Config) -> Schema | None:
 
     with closing(
         databricks_sql.connect(
-            server_hostname=config.server_hostname,
-            http_path=config.http_path,
-            access_token=config.access_token,
+            server_hostname=config.databricks_host,
+            http_path=config.databricks_http_path,
+            access_token=config.databricks_token,
         )
     ) as connection:
         client = DatabricksClient(connection)
@@ -216,7 +216,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     """Show migration status."""
     try:
-        from databricks import sql as databricks_sql
+        from databricks import sql  # noqa: F401
     except ImportError:
         print(
             "Error: databricks-sql-connector not installed. Run: pip install databricks-sql-connector",
@@ -251,9 +251,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Migrations in {migrations_path}:")
         for migration in all_migrations:
             status = (
-                "✓ applied"
-                if migration.version in applied_versions
-                else "○ pending"
+                "✓ applied" if migration.version in applied_versions else "○ pending"
             )
             print(f"  V{migration.version}: {migration.name} [{status}]")
 
@@ -297,9 +295,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         with closing(
             databricks_sql.connect(
-                server_hostname=config.server_hostname,
-                http_path=config.http_path,
-                access_token=config.access_token,
+                server_hostname=config.databricks_host,
+                http_path=config.databricks_http_path,
+                access_token=config.databricks_token,
             )
         ) as connection:
             client = DatabricksClient(connection)

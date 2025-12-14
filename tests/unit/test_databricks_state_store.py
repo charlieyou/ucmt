@@ -18,9 +18,9 @@ def config() -> Config:
     return Config(
         catalog="my_catalog",
         schema="my_schema",
-        server_hostname="test.databricks.com",
-        http_path="/sql/warehouses/abc123",
-        access_token="test_token",
+        databricks_host="test.databricks.com",
+        databricks_http_path="/sql/warehouses/abc123",
+        databricks_token="test_token",
     )
 
 
