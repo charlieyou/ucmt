@@ -1,6 +1,7 @@
 """Command-line interface for ucmt."""
 
 import argparse
+import logging
 import sys
 from contextlib import closing
 from pathlib import Path
@@ -36,6 +37,8 @@ def _validate_db_config(config: Config) -> bool:
 
 def main() -> int:
     """Main entry point."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     parser = argparse.ArgumentParser(
         prog="ucmt",
         description="Unity Catalog Migration Tool",
@@ -166,58 +169,48 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        from ucmt.client import DatabricksClient
-        from ucmt.runner import MigrationRunner
-        from ucmt.state import MigrationState
+        from ucmt.migrations.parser import parse_migrations_dir
+        from ucmt.migrations.state import DatabricksMigrationStateStore
 
         config = Config.from_env()
         if not _validate_db_config(config):
             return 1
 
-        with closing(
-            databricks_sql.connect(
-                server_hostname=config.server_hostname,
-                http_path=config.http_path,
-                access_token=config.access_token,
-            )
-        ) as connection:
-            client = DatabricksClient(connection)
-            state = MigrationState(client, config.catalog, config.schema)
-            runner = MigrationRunner(client, state, config.catalog, config.schema)
+        state_store = DatabricksMigrationStateStore(config)
 
-            migrations_path = args.migrations_path
-            all_migrations = runner.discover_migrations(migrations_path)
+        migrations_path = args.migrations_path
+        all_migrations = parse_migrations_dir(migrations_path)
 
-            if not all_migrations:
-                print(f"No migrations found in {migrations_path}")
-                return 0
-
-            try:
-                state.ensure_table()
-                applied_versions = state.get_applied_versions()
-            except Exception as e:
-                print(f"Error reading migration state: {e}", file=sys.stderr)
-                return 1
-
-            print(f"Migrations in {migrations_path}:")
-            for migration in all_migrations:
-                status = (
-                    "✓ applied"
-                    if migration.version in applied_versions
-                    else "○ pending"
-                )
-                print(f"  V{migration.version}: {migration.description} [{status}]")
-
-            pending_count = sum(
-                1 for m in all_migrations if m.version not in applied_versions
-            )
-            applied_count = len(applied_versions)
-            print(
-                f"\nTotal: {len(all_migrations)} migrations "
-                f"({applied_count} applied, {pending_count} pending)"
-            )
-
+        if not all_migrations:
+            print(f"No migrations found in {migrations_path}")
             return 0
+
+        try:
+            applied = state_store.list_applied()
+            applied_versions = {m.version for m in applied}
+        except Exception as e:
+            print(f"Error reading migration state: {e}", file=sys.stderr)
+            return 1
+
+        print(f"Migrations in {migrations_path}:")
+        for migration in all_migrations:
+            status = (
+                "✓ applied"
+                if migration.version in applied_versions
+                else "○ pending"
+            )
+            print(f"  V{migration.version}: {migration.name} [{status}]")
+
+        pending_count = sum(
+            1 for m in all_migrations if m.version not in applied_versions
+        )
+        applied_count = len(applied_versions)
+        print(
+            f"\nTotal: {len(all_migrations)} migrations "
+            f"({applied_count} applied, {pending_count} pending)"
+        )
+
+        return 0
     except Exception as e:
         print(f"Status error: {e}", file=sys.stderr)
         return 1
@@ -236,12 +229,15 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     try:
         from ucmt.client import DatabricksClient
-        from ucmt.runner import MigrationRunner
-        from ucmt.state import MigrationState
+        from ucmt.migrations.parser import parse_migrations_dir
+        from ucmt.migrations.runner import Runner, plan
+        from ucmt.migrations.state import DatabricksMigrationStateStore
 
         config = Config.from_env()
         if not _validate_db_config(config):
             return 1
+
+        state_store = DatabricksMigrationStateStore(config)
 
         with closing(
             databricks_sql.connect(
@@ -251,37 +247,50 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
         ) as connection:
             client = DatabricksClient(connection)
-            state = MigrationState(client, config.catalog, config.schema)
-            runner = MigrationRunner(client, state, config.catalog, config.schema)
 
             migrations_path = args.migrations_path
-            all_migrations = runner.discover_migrations(migrations_path)
-            state.ensure_table()
-            pending = runner.get_pending(all_migrations)
+            all_migrations = parse_migrations_dir(migrations_path)
+
+            pending = plan(all_migrations, state_store)
 
             if not pending:
                 print("No pending migrations")
                 return 0
 
             print(f"Found {len(pending)} pending migration(s):")
-            for migration in pending:
-                print(f"  V{migration.version}: {migration.description}")
+            for pm in pending:
+                print(f"  V{pm.version}: {pm.name}")
 
             if args.dry_run:
                 print("\nDry run - no migrations executed")
+                runner = Runner(
+                    state_store=state_store,
+                    executor=lambda sql, version: None,
+                    catalog=config.catalog,
+                    schema=config.schema,
+                )
+                runner.apply(all_migrations, dry_run=True)
                 return 0
 
+            def executor(sql: str, version: int) -> None:
+                statements = [s.strip() for s in sql.split(";") if s.strip()]
+                for stmt in statements:
+                    if stmt and not stmt.startswith("--"):
+                        client.execute(stmt)
+
+            runner = Runner(
+                state_store=state_store,
+                executor=executor,
+                catalog=config.catalog,
+                schema=config.schema,
+            )
+
             print()
-            for migration in pending:
-                print(
-                    f"Running V{migration.version}: {migration.description}...", end=" "
-                )
-                try:
-                    runner.run(migration)
-                    print("✓")
-                except Exception as e:
-                    print(f"✗ ({e})")
-                    return 1
+            try:
+                runner.apply(all_migrations)
+            except Exception as e:
+                print(f"Run error: {e}", file=sys.stderr)
+                return 1
 
             print(f"\nSuccessfully applied {len(pending)} migration(s)")
             return 0
