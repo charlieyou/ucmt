@@ -88,13 +88,13 @@ class SchemaIntrospector:
         if not rows:
             return None
         for row in rows:
-            if row["table_name"] == table_name:
+            if self._row_get(row, "table_name") == table_name:
                 return {
-                    "table_name": row["table_name"],
-                    "table_type": row["table_type"],
-                    "data_source_format": row.get("data_source_format"),
-                    "comment": row.get("comment"),
-                    "clustering_columns": row.get("clustering_columns"),
+                    "table_name": self._row_get(row, "table_name"),
+                    "table_type": self._row_get(row, "table_type"),
+                    "data_source_format": self._row_get(row, "data_source_format"),
+                    "comment": self._row_get(row, "comment"),
+                    "clustering_columns": self._row_get(row, "clustering_columns"),
                 }
         return None
 
@@ -125,14 +125,14 @@ class SchemaIntrospector:
         rows = self._client.fetchall(sql)
         columns = []
         for row in rows:
-            if row.get("table_name", table_name) != table_name:
+            if self._row_get(row, "table_name", table_name) != table_name:
                 continue
             col = Column(
-                name=row["column_name"],
-                type=row["data_type"].upper(),
-                nullable=row["is_nullable"] != "NO",
-                default=row.get("column_default"),
-                comment=row.get("comment"),
+                name=self._row_get(row, "column_name"),
+                type=self._row_get(row, "data_type", "").upper(),
+                nullable=self._row_get(row, "is_nullable") != "NO",
+                default=self._row_get(row, "column_default"),
+                comment=self._row_get(row, "comment"),
             )
             columns.append(col)
         return columns
@@ -156,8 +156,8 @@ class SchemaIntrospector:
         if not rows:
             return None
 
-        columns = [row["column_name"] for row in rows]
-        rely = rows[0].get("rely", False)
+        columns = [self._row_get(row, "column_name") for row in rows]
+        rely = self._row_get(rows[0], "rely", False)
         return PrimaryKey(columns=columns, rely=rely)
 
     def _fetch_check_constraints(self, table_name: str) -> list[CheckConstraint]:
@@ -175,7 +175,10 @@ class SchemaIntrospector:
             return []
 
         return [
-            CheckConstraint(name=row["constraint_name"], expression=row["check_clause"])
+            CheckConstraint(
+                name=self._row_get(row, "constraint_name"),
+                expression=self._row_get(row, "check_clause"),
+            )
             for row in rows
         ]
 
@@ -187,7 +190,7 @@ class SchemaIntrospector:
         except Exception:
             return {}
 
-        return {row["key"]: row["value"] for row in rows}
+        return {self._row_get(row, "key"): self._row_get(row, "value") for row in rows}
 
     def _parse_clustering_columns(self, table_info: dict) -> list[str]:
         """Parse clustering columns from table info."""
@@ -218,4 +221,4 @@ class SchemaIntrospector:
             WHERE table_schema = '{self._schema}'
         """
         rows = self._client.fetchall(sql)
-        return [row["table_name"] for row in rows]
+        return [self._row_get(row, "table_name") for row in rows]
