@@ -215,10 +215,10 @@ def cmd_generate(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     """Show migration status."""
     try:
-        from databricks import sql  # noqa: F401
+        from databricks.connect import DatabricksSession  # noqa: F401
     except ImportError:
         print(
-            "Error: databricks-sql-connector not installed. Run: pip install databricks-sql-connector",
+            "Error: databricks-connect not installed. Run: pip install databricks-connect",
             file=sys.stderr,
         )
         return 1

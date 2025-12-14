@@ -77,8 +77,6 @@ class Config:
             missing.append("databricks_host")
         if not self.databricks_token:
             missing.append("databricks_token")
-        if not self.databricks_http_path:
-            missing.append("databricks_http_path")
 
         if missing:
             raise ConfigError(f"Missing required configuration: {', '.join(missing)}")
