@@ -259,7 +259,6 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     """Run pending migrations."""
     try:
-        from ucmt.databricks.client import DatabricksClient
         from ucmt.migrations.parser import parse_migrations_dir
         from ucmt.migrations.runner import Runner, plan
         from ucmt.migrations.state import DatabricksMigrationStateStore
@@ -270,34 +269,37 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         state_store = DatabricksMigrationStateStore(config)
 
+        migrations_path = args.migrations_path
+        all_migrations = parse_migrations_dir(migrations_path)
+
+        pending = plan(all_migrations, state_store)
+
+        if not pending:
+            print("No pending migrations")
+            return 0
+
+        print(f"Found {len(pending)} pending migration(s):")
+        for pm in pending:
+            print(f"  V{pm.version}: {pm.name}")
+
+        if args.dry_run:
+            print("\nDry run - no migrations executed")
+            runner = Runner(
+                state_store=state_store,
+                executor=lambda sql, version: None,
+                catalog=config.catalog,
+                schema=config.schema,
+            )
+            runner.apply(all_migrations, dry_run=True)
+            return 0
+
+        from ucmt.databricks.client import DatabricksClient
+
         with DatabricksClient(
             host=config.databricks_host,
             token=config.databricks_token,
             http_path=config.databricks_http_path,
         ) as client:
-            migrations_path = args.migrations_path
-            all_migrations = parse_migrations_dir(migrations_path)
-
-            pending = plan(all_migrations, state_store)
-
-            if not pending:
-                print("No pending migrations")
-                return 0
-
-            print(f"Found {len(pending)} pending migration(s):")
-            for pm in pending:
-                print(f"  V{pm.version}: {pm.name}")
-
-            if args.dry_run:
-                print("\nDry run - no migrations executed")
-                runner = Runner(
-                    state_store=state_store,
-                    executor=lambda sql, version: None,
-                    catalog=config.catalog,
-                    schema=config.schema,
-                )
-                runner.apply(all_migrations, dry_run=True)
-                return 0
 
             def executor(sql: str, version: int) -> None:
                 statements = [s.strip() for s in sql.split(";") if s.strip()]
