@@ -1,0 +1,48 @@
+table: users
+description: Core user accounts
+
+columns:
+  - name: id
+    type: BIGINT
+    generated: ALWAYS AS IDENTITY
+    nullable: false
+
+  - name: email
+    type: STRING
+    nullable: false
+
+  - name: display_name
+    type: STRING
+    nullable: true
+
+  - name: status
+    type: STRING
+    nullable: false
+    default: "'active'"
+    check: "status IN ('active', 'suspended', 'deleted')"
+
+  - name: metadata
+    type: MAP<STRING, STRING>
+    nullable: true
+
+  - name: created_at
+    type: TIMESTAMP
+    nullable: false
+    default: current_timestamp()
+
+  - name: updated_at
+    type: TIMESTAMP
+    nullable: true
+
+primary_key:
+  columns: [id]
+  rely: true
+
+liquid_clustering: [status, created_at]
+
+table_properties:
+  delta.enableChangeDataFeed: "true"
+  delta.autoOptimize.optimizeWrite: "true"
+  delta.columnMapping.mode: "name"
+
+comment: "Core user accounts table"
