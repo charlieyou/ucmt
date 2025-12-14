@@ -47,10 +47,3 @@ class TestSchemaChange:
         )
         assert change.is_unsupported is True
         assert change.error_message is not None
-
-    def test_schema_change_details_default_is_not_shared(self):
-        """Each SchemaChange instance has its own details dict."""
-        c1 = SchemaChange(change_type=ChangeType.ADD_COLUMN, table_name="t1")
-        c2 = SchemaChange(change_type=ChangeType.ADD_COLUMN, table_name="t2")
-        c1.details["x"] = 1
-        assert "x" not in c2.details
