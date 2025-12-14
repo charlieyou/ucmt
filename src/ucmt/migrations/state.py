@@ -136,6 +136,18 @@ class DatabricksMigrationStateStore:
         )
         self._ensure_state_table()
 
+    def __enter__(self) -> "DatabricksMigrationStateStore":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the database connection."""
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+
     @property
     def state_table_fqn(self) -> str:
         return f"{self._catalog}.{self._schema}.{self._state_table}"

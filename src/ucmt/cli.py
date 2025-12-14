@@ -254,39 +254,40 @@ def cmd_status(args: argparse.Namespace) -> int:
         if not _validate_db_config(config):
             return 1
 
-        state_store = DatabricksMigrationStateStore(config)
+        with DatabricksMigrationStateStore(config) as state_store:
+            migrations_path = args.migrations_path
+            all_migrations = parse_migrations_dir(migrations_path)
 
-        migrations_path = args.migrations_path
-        all_migrations = parse_migrations_dir(migrations_path)
+            if not all_migrations:
+                print(f"No migrations found in {migrations_path}")
+                return 0
 
-        if not all_migrations:
-            print(f"No migrations found in {migrations_path}")
-            return 0
+            try:
+                applied = state_store.list_applied()
+                applied_versions = {m.version for m in applied}
+            except Exception as e:
+                print(f"Error reading migration state: {e}", file=sys.stderr)
+                return 1
 
-        try:
-            applied = state_store.list_applied()
-            applied_versions = {m.version for m in applied}
-        except Exception as e:
-            print(f"Error reading migration state: {e}", file=sys.stderr)
-            return 1
+            print(f"Migrations in {migrations_path}:")
+            for migration in all_migrations:
+                status = (
+                    "✓ applied"
+                    if migration.version in applied_versions
+                    else "○ pending"
+                )
+                print(f"  V{migration.version}: {migration.name} [{status}]")
 
-        print(f"Migrations in {migrations_path}:")
-        for migration in all_migrations:
-            status = (
-                "✓ applied" if migration.version in applied_versions else "○ pending"
+            pending_count = sum(
+                1 for m in all_migrations if m.version not in applied_versions
             )
-            print(f"  V{migration.version}: {migration.name} [{status}]")
+            applied_count = len(applied_versions)
+            print(
+                f"\nTotal: {len(all_migrations)} migrations "
+                f"({applied_count} applied, {pending_count} pending)"
+            )
 
-        pending_count = sum(
-            1 for m in all_migrations if m.version not in applied_versions
-        )
-        applied_count = len(applied_versions)
-        print(
-            f"\nTotal: {len(all_migrations)} migrations "
-            f"({applied_count} applied, {pending_count} pending)"
-        )
-
-        return 0
+            return 0
     except Exception as e:
         print(f"Status error: {e}", file=sys.stderr)
         return 1
@@ -303,26 +304,25 @@ def cmd_plan(args: argparse.Namespace) -> int:
         if not _validate_db_config(config):
             return 1
 
-        state_store = DatabricksMigrationStateStore(config)
+        with DatabricksMigrationStateStore(config) as state_store:
+            migrations_path = args.migrations_path
+            all_migrations = parse_migrations_dir(migrations_path)
 
-        migrations_path = args.migrations_path
-        all_migrations = parse_migrations_dir(migrations_path)
+            if not all_migrations:
+                print(f"No migrations found in {migrations_path}")
+                return 0
 
-        if not all_migrations:
-            print(f"No migrations found in {migrations_path}")
+            pending = plan(all_migrations, state_store)
+
+            if not pending:
+                print("No pending migrations")
+                return 0
+
+            print(f"Pending migrations ({len(pending)}):")
+            for pm in pending:
+                print(f"  V{pm.version}: {pm.name}")
+
             return 0
-
-        pending = plan(all_migrations, state_store)
-
-        if not pending:
-            print("No pending migrations")
-            return 0
-
-        print(f"Pending migrations ({len(pending)}):")
-        for pm in pending:
-            print(f"  V{pm.version}: {pm.name}")
-
-        return 0
     except ConfigError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         return 2
@@ -342,62 +342,61 @@ def cmd_run(args: argparse.Namespace) -> int:
         if not _validate_db_config(config):
             return 1
 
-        state_store = DatabricksMigrationStateStore(config)
+        with DatabricksMigrationStateStore(config) as state_store:
+            migrations_path = args.migrations_path
+            all_migrations = parse_migrations_dir(migrations_path)
 
-        migrations_path = args.migrations_path
-        all_migrations = parse_migrations_dir(migrations_path)
+            pending = plan(all_migrations, state_store)
 
-        pending = plan(all_migrations, state_store)
+            if not pending:
+                print("No pending migrations")
+                return 0
 
-        if not pending:
-            print("No pending migrations")
-            return 0
+            print(f"Found {len(pending)} pending migration(s):")
+            for pm in pending:
+                print(f"  V{pm.version}: {pm.name}")
 
-        print(f"Found {len(pending)} pending migration(s):")
-        for pm in pending:
-            print(f"  V{pm.version}: {pm.name}")
+            if args.dry_run:
+                print("\nDry run - no migrations executed")
+                runner = Runner(
+                    state_store=state_store,
+                    executor=lambda sql, version: None,
+                    catalog=config.catalog,
+                    schema=config.schema,
+                )
+                runner.apply(all_migrations, dry_run=True)
+                return 0
 
-        if args.dry_run:
-            print("\nDry run - no migrations executed")
-            runner = Runner(
-                state_store=state_store,
-                executor=lambda sql, version: None,
-                catalog=config.catalog,
-                schema=config.schema,
-            )
-            runner.apply(all_migrations, dry_run=True)
-            return 0
+            from ucmt.databricks.client import DatabricksClient
 
-        from ucmt.databricks.client import DatabricksClient
+            with DatabricksClient(
+                host=config.databricks_host,
+                token=config.databricks_token,
+                http_path=config.databricks_http_path,
+            ) as client:
 
-        with DatabricksClient(
-            host=config.databricks_host,
-            token=config.databricks_token,
-            http_path=config.databricks_http_path,
-        ) as client:
+                def executor(sql: str, version: int) -> None:
+                    statements = [s.strip() for s in sql.split(";") if s.strip()]
+                    for stmt in statements:
+                        if stmt and not stmt.startswith("--"):
+                            client.execute(stmt)
 
-            def executor(sql: str, version: int) -> None:
-                statements = [s.strip() for s in sql.split(";") if s.strip()]
-                for stmt in statements:
-                    if stmt and not stmt.startswith("--"):
-                        client.execute(stmt)
+                runner = Runner(
+                    state_store=state_store,
+                    executor=executor,
+                    catalog=config.catalog,
+                    schema=config.schema,
+                )
 
-            runner = Runner(
-                state_store=state_store,
-                executor=executor,
-                catalog=config.catalog,
-                schema=config.schema,
-            )
+                print()
+                try:
+                    runner.apply(all_migrations)
+                except Exception as e:
+                    print(f"Run error: {e}", file=sys.stderr)
+                    return 1
 
-            print()
-            try:
-                runner.apply(all_migrations)
-            except Exception as e:
-                print(f"Run error: {e}", file=sys.stderr)
-                return 1
-
-            print(f"\nSuccessfully applied {len(pending)} migration(s)")
-            return 0
+                print(f"\nSuccessfully applied {len(pending)} migration(s)")
+                return 0
     except ConfigError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         return 2
