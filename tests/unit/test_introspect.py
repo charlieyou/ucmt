@@ -2,8 +2,40 @@
 
 from unittest.mock import MagicMock
 
-
 from ucmt.schema.introspect import SchemaIntrospector
+
+
+class DictRow:
+    """Row with .get() method like a dict."""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+
+class PySparkRow:
+    """Row with .asDict() method like PySpark Row (no .get())."""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    def asDict(self):
+        return self._data
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+
+class GetItemOnlyRow:
+    """Row with only __getitem__ (no .get() or .asDict())."""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    def __getitem__(self, key):
+        return self._data[key]
 
 
 class FakeRow:
@@ -433,3 +465,55 @@ class TestIntrospectSchema:
         assert "users" in schema.tables
         assert "orders" in schema.tables
         assert "user_view" not in schema.tables
+
+
+class TestRowGetHelper:
+    """Tests for _row_get helper method handling different row types."""
+
+    def test_row_get_with_dict_row(self):
+        """_row_get works with dict-like rows that have .get()."""
+        client = MagicMock()
+        introspector = SchemaIntrospector(client, catalog="main", schema="default")
+
+        row = DictRow({"name": "alice", "age": 30})
+
+        assert introspector._row_get(row, "name") == "alice"
+        assert introspector._row_get(row, "age") == 30
+        assert introspector._row_get(row, "missing") is None
+        assert introspector._row_get(row, "missing", "default") == "default"
+
+    def test_row_get_with_pyspark_row(self):
+        """_row_get works with PySpark Row objects that have .asDict()."""
+        client = MagicMock()
+        introspector = SchemaIntrospector(client, catalog="main", schema="default")
+
+        row = PySparkRow({"column_name": "id", "data_type": "BIGINT"})
+
+        assert introspector._row_get(row, "column_name") == "id"
+        assert introspector._row_get(row, "data_type") == "BIGINT"
+        assert introspector._row_get(row, "missing") is None
+        assert introspector._row_get(row, "missing", False) is False
+
+    def test_row_get_with_getitem_only_row(self):
+        """_row_get works with rows that only have __getitem__."""
+        client = MagicMock()
+        introspector = SchemaIntrospector(client, catalog="main", schema="default")
+
+        row = GetItemOnlyRow({"key": "value", "count": 42})
+
+        assert introspector._row_get(row, "key") == "value"
+        assert introspector._row_get(row, "count") == 42
+        assert introspector._row_get(row, "missing") is None
+        assert introspector._row_get(row, "missing", "fallback") == "fallback"
+
+    def test_row_get_with_plain_dict(self):
+        """_row_get works with plain Python dicts."""
+        client = MagicMock()
+        introspector = SchemaIntrospector(client, catalog="main", schema="default")
+
+        row = {"table_name": "users", "table_type": "MANAGED"}
+
+        assert introspector._row_get(row, "table_name") == "users"
+        assert introspector._row_get(row, "table_type") == "MANAGED"
+        assert introspector._row_get(row, "missing") is None
+        assert introspector._row_get(row, "missing", "N/A") == "N/A"
