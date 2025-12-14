@@ -40,14 +40,8 @@ class SchemaDiffer:
                 )
             )
 
-        for table_name in source_tables - target_tables:
-            changes.append(
-                SchemaChange(
-                    change_type=ChangeType.DROP_TABLE,
-                    table_name=table_name,
-                    is_destructive=True,
-                )
-            )
+        # v1: DO NOT generate DROP_TABLE for extra DB tables
+        # Extra tables in source but not in target are ignored
 
         for table_name in source_tables & target_tables:
             source_table = source.get_table(table_name)
@@ -77,11 +71,12 @@ class SchemaDiffer:
         target_cols = {c.name: c for c in target.columns}
 
         for col_name in set(target_cols) - set(source_cols):
+            col = target_cols[col_name]
             changes.append(
                 SchemaChange(
                     change_type=ChangeType.ADD_COLUMN,
                     table_name=table_name,
-                    details={"column": target_cols[col_name]},
+                    details={"column": col, "column_name": col_name},
                 )
             )
 
@@ -176,6 +171,12 @@ class SchemaDiffer:
             return True, None
 
         if from_upper == to_upper:
+            # Same base type but different parameters (e.g., DECIMAL precision)
+            if from_type.upper() != to_type.upper():
+                return False, (
+                    f"Changing {from_type} to {to_type} is not supported. "
+                    "Precision/scale changes are not allowed."
+                )
             return True, None
 
         return False, (
@@ -292,7 +293,7 @@ class SchemaDiffer:
         return changes
 
     def _order_changes(self, changes: list[SchemaChange]) -> list[SchemaChange]:
-        """Order changes by dependency (creates first, drops last)."""
+        """Order changes by dependency (creates first, drops last), then by table name."""
         order = {
             ChangeType.CREATE_TABLE: 0,
             ChangeType.ADD_COLUMN: 1,
@@ -310,4 +311,9 @@ class SchemaDiffer:
             ChangeType.DROP_COLUMN: 6,
             ChangeType.DROP_TABLE: 7,
         }
-        return sorted(changes, key=lambda c: order.get(c.change_type, 99))
+
+        def sort_key(c: SchemaChange) -> tuple[int, str, str]:
+            col_name = c.details.get("column_name", "") or ""
+            return (order.get(c.change_type, 99), c.table_name, col_name)
+
+        return sorted(changes, key=sort_key)
