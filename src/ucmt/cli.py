@@ -10,6 +10,7 @@ from ucmt.config import Config
 from ucmt.schema.codegen import MigrationGenerator
 from ucmt.schema.diff import SchemaDiffer
 from ucmt.schema.loader import load_schema
+from ucmt.schema.models import Schema
 
 
 def _validate_db_config(config: Config) -> bool:
@@ -35,6 +36,39 @@ def _validate_db_config(config: Config) -> bool:
     return True
 
 
+def _get_current_schema_online(config: Config) -> Schema | None:
+    """Get current schema from database via introspection.
+
+    Returns None if there's an error (error message already printed to stderr).
+    """
+    try:
+        from databricks import sql as databricks_sql
+    except ImportError:
+        print(
+            "Error: databricks-sql-connector not installed. "
+            "Run: pip install databricks-sql-connector",
+            file=sys.stderr,
+        )
+        return None
+
+    from ucmt.client import DatabricksClient
+    from ucmt.schema.introspect import SchemaIntrospector
+
+    if not _validate_db_config(config):
+        return None
+
+    with closing(
+        databricks_sql.connect(
+            server_hostname=config.server_hostname,
+            http_path=config.http_path,
+            access_token=config.access_token,
+        )
+    ) as connection:
+        client = DatabricksClient(connection)
+        introspector = SchemaIntrospector(client, config.catalog, config.schema)
+        return introspector.introspect_schema()
+
+
 def main() -> int:
     """Main entry point."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -47,11 +81,21 @@ def main() -> int:
 
     diff_parser = subparsers.add_parser("diff", help="Show schema diff")
     diff_parser.add_argument("--schema-path", type=Path, default=Path("schema/tables"))
+    diff_parser.add_argument(
+        "--online",
+        action="store_true",
+        help="Compare against actual database state (requires DB connection)",
+    )
 
     generate_parser = subparsers.add_parser("generate", help="Generate migration")
     generate_parser.add_argument("description", help="Migration description")
     generate_parser.add_argument(
         "--schema-path", type=Path, default=Path("schema/tables")
+    )
+    generate_parser.add_argument(
+        "--online",
+        action="store_true",
+        help="Compare against actual database state (requires DB connection)",
     )
 
     validate_parser = subparsers.add_parser("validate", help="Validate schema files")
@@ -106,12 +150,18 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_diff(args: argparse.Namespace) -> int:
-    """Show schema diff (offline mode - declared vs empty)."""
+    """Show schema diff (offline mode compares declared vs empty, online mode compares against DB)."""
     try:
-        from ucmt.schema.models import Schema
-
         declared = load_schema(args.schema_path)
-        current = Schema(tables={})
+
+        if args.online:
+            config = Config.from_env()
+            current = _get_current_schema_online(config)
+            if current is None:
+                return 1
+        else:
+            current = Schema(tables={})
+
         differ = SchemaDiffer()
         changes = differ.diff(current, declared)
 
@@ -119,7 +169,8 @@ def cmd_diff(args: argparse.Namespace) -> int:
             print("No changes detected")
             return 0
 
-        print(f"Found {len(changes)} changes:")
+        mode = "online" if args.online else "offline"
+        print(f"Found {len(changes)} changes ({mode} mode):")
         for change in changes:
             prefix = "[UNSUPPORTED] " if change.is_unsupported else ""
             print(f"  {prefix}{change.change_type.value}: {change.table_name}")
@@ -133,11 +184,16 @@ def cmd_diff(args: argparse.Namespace) -> int:
 def cmd_generate(args: argparse.Namespace) -> int:
     """Generate migration from diff."""
     try:
-        from ucmt.schema.models import Schema
-
         config = Config.from_env()
         declared = load_schema(args.schema_path)
-        current = Schema(tables={})
+
+        if args.online:
+            current = _get_current_schema_online(config)
+            if current is None:
+                return 1
+        else:
+            current = Schema(tables={})
+
         differ = SchemaDiffer()
         changes = differ.diff(current, declared)
 

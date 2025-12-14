@@ -31,13 +31,20 @@ Follows patterns from Prisma, Atlas, and Alembic autogenerate.
 ## Planned CLI Commands
 
 ```bash
-db-migrate generate "description"  # Generate migration from schema diff
-db-migrate diff                    # Show diff without creating file
-db-migrate run                     # Run pending migrations
-db-migrate validate                # Validate schema files
-db-migrate pull                    # Pull current DB schema to YAML
-db-migrate status                  # Show applied migrations
+ucmt generate "description"        # Generate migration from schema diff (offline)
+ucmt generate "desc" --online      # Generate migration comparing against actual DB
+ucmt diff                          # Show diff vs empty schema (offline)
+ucmt diff --online                 # Show diff vs actual database state
+ucmt run                           # Run pending migrations
+ucmt validate                      # Validate schema files
+ucmt pull                          # Pull current DB schema to YAML
+ucmt status                        # Show applied migrations
 ```
+
+### Offline vs Online Mode
+
+- **Offline mode (default)**: Compares declared YAML schema against an empty schema. Useful for generating initial migrations or when DB access is not available.
+- **Online mode (`--online`)**: Compares declared YAML schema against the actual database state using introspection. Requires `DATABRICKS_*` environment variables to be set.
 
 ## Schema Definition (YAML)
 
