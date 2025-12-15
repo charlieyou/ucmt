@@ -120,6 +120,21 @@ table_properties:
 | Type widening | ✅ Limited | INT→BIGINT, FLOAT→DOUBLE, etc. |
 | Type narrowing | ❌ | Not supported |
 
+### Not Yet Supported
+
+The following Unity Catalog features are not yet supported but are planned:
+
+| Feature | Description |
+|---------|-------------|
+| Row filters | Row-level security via SQL UDF |
+| Column masks | Column-level data masking via SQL UDF |
+| Table type | MANAGED vs EXTERNAL with storage location |
+| Multi-column FK | Table-level foreign key constraints |
+| Tags | Table and column-level governance tags |
+| Storage credentials | Credential for external table access |
+| Predictive optimization | Auto-optimization enable/disable/inherit |
+| Views | VIEW, MATERIALIZED_VIEW, STREAMING_TABLE |
+
 ## Key Design Decisions
 
 1. **No indexes** — Use `liquid_clustering` for query optimization
