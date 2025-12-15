@@ -33,4 +33,12 @@ bd close <id> --reason "Done" --json
     a. Include Amp thread URL and beads ID in description
     b. Include how I can verify that the work is completed, a command to run to test new functionality
 7. `bd close <id>` → complete
-8. Commit `.beads/issues.jsonl` with code changes
+
+
+#### Merging and Cleanup
+
+1. `gh pr merge [pr-number]
+2. Navigate out of the worktree: `cd ../../ucmt`
+3. Remove worktree: `git worktree remove [worktree-branch]
+4. Delete the branch: `git branch -d [worktree-branch]
+5. Prune remote branches: `git fetch --prune`
